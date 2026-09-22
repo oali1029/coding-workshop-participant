@@ -256,3 +256,7 @@ tfplan
 
 # Snyk Security Extension - AI Rules (auto-generated)
 .github/instructions/snyk_rules.instructions.md
+
+# Python generated files
+__pycache__/
+*.py[cod]
