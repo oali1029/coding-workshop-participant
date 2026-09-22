@@ -82,6 +82,11 @@ class Request:
         path_params: Values pulled out of the URL pattern by the router. For
             the route "/incidents/{id}" matching "/incidents/42", this holds
             {"id": "42"}.
+        user: The signed-in user's database row, filled in by the router for
+            routes that require authentication. It stays None on public routes,
+            so a handler reading `request.user` without its route declaring an
+            access rule will fail loudly rather than silently treating the
+            caller as anonymous.
     """
 
     method: str
@@ -95,6 +100,7 @@ class Request:
     body: Any = None
     raw_body: str = ""
     path_params: dict[str, str] = field(default_factory=dict)
+    user: dict[str, Any] | None = None
 
     def json_body(self) -> dict[str, Any]:
         """Return the body as a JSON object, refusing anything else.

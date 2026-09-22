@@ -83,3 +83,18 @@ variable "aws_eks_type" {
     error_message = "The aws_eks_type variable must be either 'ON_DEMAND' or 'SPOT'."
   }
 }
+
+# Password for the bootstrap FACILITY_ADMIN account the backend creates on
+# startup. Supplied by the deployer, never stored in this repository:
+#
+#   export TF_VAR_aws_bootstrap_admin_password='<chosen-password>'
+#
+# Leaving it empty is supported and safe. The Lambda module filters out empty
+# environment variables, so the backend simply sees the variable as unset,
+# logs a warning, and skips creating the administrator account.
+variable "aws_bootstrap_admin_password" {
+  description = "Bootstrap FACILITY_ADMIN password. Leave empty to skip creating the account."
+  type        = string
+  default     = ""
+  sensitive   = true
+}

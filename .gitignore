@@ -260,3 +260,6 @@ tfplan
 # Python generated files
 __pycache__/
 *.py[cod]
+
+# Python test cache
+.pytest_cache/

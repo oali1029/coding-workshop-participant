@@ -1,0 +1,11 @@
+# Development and test dependencies.
+#
+# KEPT SEPARATE FROM requirements.txt ON PURPOSE. Terraform packages this
+# service for Lambda by installing everything in requirements.txt into the
+# upload, so anything listed there is shipped to production. Test tooling has
+# no business running in the cloud, and would only make the upload larger and
+# cold starts slower.
+#
+# Install locally with:
+#     pip install -r requirements.txt -r requirements-dev.txt
+pytest==8.3.4

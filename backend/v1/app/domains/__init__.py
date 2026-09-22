@@ -28,9 +28,10 @@ tested by constructing a Request directly — no AWS, no web server needed.
 =============================================================================
 WHAT EXISTS SO FAR
 =============================================================================
-Slice 0 contains only `health`, the endpoint that proves the system is alive.
-Later slices add auth, users, facilities, engineers, incidents, notes, and
-reports.
+    health   proves the system and its database are reachable (Slice 0).
+    auth     registration, login, and "who am I" (Slice 1).
+
+Later slices add users, facilities, engineers, incidents, notes and reports.
 """
 
-__all__ = ["health"]
+__all__ = ["auth", "health"]

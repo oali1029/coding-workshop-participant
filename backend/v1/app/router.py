@@ -1,17 +1,37 @@
-"""Deciding which function handles an incoming URL.
+"""Deciding which function handles an incoming URL, and who is allowed to.
 
 =============================================================================
 WHAT THIS FILE IS RESPONSIBLE FOR
 =============================================================================
-A request arrives saying "GET /incidents/42". Something has to decide that
-this means "run the function that fetches one incident, and tell it the id is
-42". That decision is called routing, and this file does it.
+Two jobs, both applied to every request:
 
-Larger projects use a framework such as Flask or FastAPI for this. We write it
-by hand, in about a hundred lines, for two reasons: every extra library has to
-be packaged into the Lambda upload and slows cold starts, and a hand-written
-router makes the request flow completely visible rather than hidden inside
-someone else's abstraction.
+    ROUTING        "GET /incidents/42" means "run the fetch-one-incident
+                   function, and tell it the id is 42".
+
+    AUTHORIZATION  before that function runs, confirm the caller is signed in
+                   and holds a role the route permits.
+
+Larger projects use a framework such as Flask or FastAPI for routing. We write
+it by hand, in about two hundred lines, for two reasons: every extra library
+has to be packaged into the Lambda upload and slows cold starts, and a
+hand-written router makes the request flow completely visible rather than
+hidden inside someone else's abstraction.
+
+=============================================================================
+WHY PERMISSIONS ARE DECLARED HERE AND NOT INSIDE EACH HANDLER
+=============================================================================
+Each route states who may call it, right next to the URL:
+
+    Route("GET", "/auth/me", auth.me, roles=security.ANY_AUTHENTICATED)
+
+`dispatch` enforces that centrally, before the handler is called. The handler
+itself contains no permission logic at all.
+
+This matters because the most common way an application leaks data is not a
+broken check — it is a MISSING one. If each handler did its own checking, a new
+endpoint added in a hurry would default to "wide open", and nothing would look
+wrong in review. Here, a route cannot be added without writing down its access
+rule, and the whole permission model can be audited by reading one list.
 
 =============================================================================
 THE MOST IMPORTANT THING IN THIS FILE: THE URL PREFIX PROBLEM
@@ -27,18 +47,18 @@ But the two environments handle it DIFFERENTLY.
       CloudFront matches the rule "/api/v1*" and forwards the request to the
       Lambda WITHOUT changing the URL. Our handler receives the full path:
 
-          /api/v1/incidents/42
+          /api/v1/auth/login
 
   ON A LAPTOP, via the development proxy (bin/proxy-server.js)
       That proxy is a small helper script the workshop provides. It splits the
       URL into "/api/{service}" plus the rest, looks up the service's address,
       and forwards ONLY THE REST. Our handler receives:
 
-          /incidents/42
+          /auth/login
 
 Same browser request, two different paths arriving at our code. If we wrote
-our routes as "/api/v1/incidents" they would only work on AWS; if we wrote
-them as "/incidents" they would only work locally.
+our routes as "/api/v1/auth/login" they would only work on AWS; if we wrote
+them as "/auth/login" they would only work locally.
 
 The fix is `strip_service_prefix` below. We remove the prefix if it is there,
 leaving a consistent path in both environments, and then define every route
@@ -62,9 +82,11 @@ a number must convert and validate it themselves.
 """
 
 import logging
+from dataclasses import dataclass
 from typing import Any, Callable
 
-from .domains import health
+from . import security
+from .domains import auth, health
 from .errors import AppError, NotFoundError
 from .http import Request
 
@@ -81,12 +103,49 @@ SERVICE_PREFIX = "/api/v1"
 # A handler takes our Request and returns the response dictionary AWS expects.
 Handler = Callable[[Request], dict[str, Any]]
 
-# The routing table: (HTTP method, URL pattern, function to run).
+
+@dataclass(frozen=True)
+class Route:
+    """One endpoint: a URL, the function behind it, and who may call it.
+
+    Attributes:
+        method: HTTP verb this route answers.
+        pattern: Path pattern without the service prefix, e.g. "/auth/login".
+        handler: Function to run.
+        roles: Which roles may call it. `None` means the endpoint is PUBLIC —
+            written explicitly so that "anyone may call this" is a visible
+            decision in the route table rather than an omission.
+    """
+
+    method: str
+    pattern: str
+    handler: Handler
+    roles: frozenset[str] | None = None
+
+
+# =============================================================================
+# THE ROUTE TABLE — the complete, auditable surface of this API
+# =============================================================================
+# Read the `roles` column to understand the security model at a glance:
 #
-# Keeping every route in one visible list means you can read the API's entire
-# surface at a glance. Later slices append their routes here.
-ROUTES: list[tuple[str, str, Handler]] = [
-    ("GET", "/health", health.get_health),
+#   None                       public, no token needed
+#   security.ANY_AUTHENTICATED any signed-in user, whatever their role
+#   frozenset({...})           only the listed roles
+#
+# Later slices add incident, facility and reporting routes here.
+ROUTES: list[Route] = [
+    # Public: the system status check. No token, because monitoring needs to
+    # reach it and it exposes nothing sensitive.
+    Route("GET", "/health", health.get_health, roles=None),
+
+    # Public by necessity: a person cannot hold a token before they have an
+    # account or have signed in.
+    Route("POST", "/auth/register", auth.register, roles=None),
+    Route("POST", "/auth/login", auth.login, roles=None),
+
+    # Protected: requires a valid token, but any role will do. Used by the
+    # React app on startup to turn a stored token back into a name and role.
+    Route("GET", "/auth/me", auth.me, roles=security.ANY_AUTHENTICATED),
 ]
 
 
@@ -104,10 +163,10 @@ def strip_service_prefix(path: str) -> str:
         The path with the prefix removed, always beginning with "/".
 
     Examples:
-        "/api/v1/incidents" -> "/incidents"    (arrived via CloudFront)
-        "/incidents"        -> "/incidents"    (arrived via the local proxy)
-        "/api/v1"           -> "/"             (the bare prefix, no sub-path)
-        "/api/v1/"          -> "/"
+        "/api/v1/auth/login" -> "/auth/login"   (arrived via CloudFront)
+        "/auth/login"        -> "/auth/login"   (arrived via the local proxy)
+        "/api/v1"            -> "/"             (the bare prefix, no sub-path)
+        "/api/v1/"           -> "/"
     """
     if path.startswith(SERVICE_PREFIX):
         path = path[len(SERVICE_PREFIX):]
@@ -169,21 +228,23 @@ def _match(pattern: str, path: str) -> dict[str, str] | None:
 
 
 def dispatch(request: Request) -> dict[str, Any]:
-    """Find the handler for this request, run it, and return its response.
+    """Find the handler for this request, check permissions, and run it.
 
-    This is step 5 of the request journey described in app/__init__.py.
+    This is step 5 of the request journey described in app/__init__.py, and the
+    single point at which every authorization decision is made.
 
     Args:
-        request: The parsed request. Its `path` is normalised here before
-            matching, and `path_params` is filled in before the handler runs.
+        request: The parsed request. Its `path` is normalised here, and
+            `path_params` and `user` are filled in before the handler runs.
 
     Returns:
         Whatever the matched handler returned.
 
     Raises:
         NotFoundError: No route pattern matched the path at all.
-        AppError: A route matched the path but not the HTTP method, returned
-            as 405 Method Not Allowed.
+        AppError: A route matched the path but not the HTTP method (405).
+        UnauthorizedError: The route needs a token and none was valid (401).
+        ForbiddenError: The caller is known but lacks the required role (403).
     """
     request.path = strip_service_prefix(request.path)
 
@@ -193,21 +254,40 @@ def dispatch(request: Request) -> dict[str, Any]:
     # debugging, and the distinction HTTP intends between 404 and 405.
     path_matched = False
 
-    for method, pattern, handler in ROUTES:
-        params = _match(pattern, request.path)
+    for route in ROUTES:
+        params = _match(route.pattern, request.path)
         if params is None:
             continue
 
         path_matched = True
 
-        if method != request.method:
+        if route.method != request.method:
             continue
 
-        # Hand the captured URL values to the handler via the request object,
-        # so handlers never have to parse URLs themselves.
+        # ---------------------------------------------------------------
+        # THE SECURITY GATE. Everything past this point is a permitted call.
+        # ---------------------------------------------------------------
+        # Order matters and mirrors the two HTTP status codes:
+        #   authenticate first  -> "who are you?"      -> 401 if unanswerable
+        #   then authorize      -> "may you do this?"  -> 403 if not
+        #
+        # `roles is None` means the route is public, so both steps are skipped
+        # and `request.user` stays None.
+        if route.roles is not None:
+            request.user = security.authenticate_request(request)
+            security.require_roles(request.user, route.roles)
+
         request.path_params = params
-        logger.info("Routing %s %s to %s", request.method, request.path, handler.__name__)
-        return handler(request)
+
+        logger.info(
+            "Routing %s %s to %s (user=%s)",
+            request.method,
+            request.path,
+            route.handler.__name__,
+            request.user["id"] if request.user else "anonymous",
+        )
+
+        return route.handler(request)
 
     if path_matched:
         raise AppError(

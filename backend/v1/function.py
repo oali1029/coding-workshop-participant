@@ -73,11 +73,22 @@ _MIGRATIONS_DONE = False
 
 
 def _ensure_migrations() -> None:
-    """Bring the database schema up to date, at most once per Lambda copy.
+    """Prepare the database, at most once per Lambda copy.
+
+    Two steps, in order:
+      1. Apply any outstanding schema migrations.
+      2. Create the bootstrap administrator if it is missing and a password was
+         supplied via the environment.
+
+    Step 2 is separate from the migrations on purpose. Its password comes from
+    an environment variable that may not be set, and a one-time migration that
+    silently skipped the account would never get another chance to create it.
+    Running it on each startup makes it self-healing — see
+    migrations.ensure_bootstrap_admin.
 
     Runs on the first request each copy handles. Later requests to the same
-    warm copy skip it, because doing a database round trip on every single
-    request purely to confirm nothing has changed would be wasteful.
+    warm copy skip it, because a database round trip on every single request
+    purely to confirm nothing has changed would be wasteful.
 
     Raises:
         Exception: Whatever the migration failed with. This is deliberately
@@ -92,6 +103,10 @@ def _ensure_migrations() -> None:
 
     version = migrations.run_migrations()
     logger.info("Database schema is at version %s", version)
+
+    # Never raises for a missing password — it logs a warning and moves on, so
+    # the absence of an optional admin account cannot take the whole API down.
+    migrations.ensure_bootstrap_admin()
 
     # Set only AFTER success. If migration raises, the flag stays False so the
     # next request retries — which matters because the failure may simply be
