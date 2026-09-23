@@ -1,12 +1,19 @@
 /**
- * Incident Details — one incident, read-only for this slice.
+ * Incident Details — one incident, plus the controls the signed-in role may use.
  *
- * A 404 here means either "no such incident" or "it belongs to someone else";
- * the API deliberately does not distinguish the two, so this page shows the
- * same message for both.
+ * A 404 means "no such incident" *or* "you have no claim on it"; the API does
+ * not distinguish them, so neither does this page.
+ *
+ * Who sees which controls:
+ *   Employee   read-only, even on their own report
+ *   Engineer   status control, only on incidents assigned to them, and never CLOSED
+ *   Admin      status control on any incident, plus the assignee picker
+ *
+ * These are conveniences. The API re-checks every rule, so hiding a control only
+ * spares the user a refusal they could not have acted on anyway.
  */
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import {
   Alert,
@@ -15,14 +22,27 @@ import {
   Chip,
   CircularProgress,
   Divider,
+  MenuItem,
   Paper,
+  Snackbar,
   Stack,
+  TextField,
   Typography,
 } from '@mui/material'
 import { Link as RouterLink, useParams } from 'react-router-dom'
 
-import { getIncident } from '../api/client'
-import { categoryLabel, formatDateTime, priorityDisplay, statusDisplay } from '../incidents'
+import { getIncident, listEngineers, updateIncident } from '../api/client'
+import useAuth from '../auth/useAuth'
+import WorkflowStepper from '../components/WorkflowStepper'
+import {
+  ADMIN_SETTABLE,
+  ENGINEER_SETTABLE,
+  categoryLabel,
+  formatDateTime,
+  priorityDisplay,
+  statusDisplay,
+} from '../incidents'
+import { ROLE_ENGINEER, ROLE_FACILITY_ADMIN } from '../roles'
 
 function DetailRow({ label, children }) {
   return (
@@ -40,13 +60,20 @@ function DetailRow({ label, children }) {
 }
 
 export default function IncidentDetailPage() {
-  // The :id segment from the route. It is a string, and is sent to the API as
-  // given — the backend validates it rather than the browser.
   const { id } = useParams()
+  const { user } = useAuth()
 
   const [status, setStatus] = useState('loading')
   const [incident, setIncident] = useState(null)
   const [errorMessage, setErrorMessage] = useState('')
+
+  const [engineers, setEngineers] = useState([])
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
+  const [toast, setToast] = useState('')
+
+  const isAdmin = user.role === ROLE_FACILITY_ADMIN
+  const isEngineer = user.role === ROLE_ENGINEER
 
   useEffect(() => {
     let ignore = false
@@ -77,16 +104,75 @@ export default function IncidentDetailPage() {
     }
   }, [id])
 
+  // Only admins can assign, so only admins need the list of engineers.
+  useEffect(() => {
+    if (!isAdmin) {
+      return undefined
+    }
+
+    let ignore = false
+
+    async function loadEngineers() {
+      try {
+        const data = await listEngineers()
+        if (!ignore) {
+          setEngineers(data.engineers)
+        }
+      } catch {
+        // Not fatal: the rest of the page still works, the picker is just empty.
+      }
+    }
+
+    loadEngineers()
+
+    return () => {
+      ignore = true
+    }
+  }, [isAdmin])
+
+  /**
+   * Send a change and replace the incident with the server's version.
+   *
+   * We render what came back rather than what we sent, so the page always shows
+   * what was actually stored — including fields the server derived, like
+   * assignee_name and updated_at.
+   */
+  const save = useCallback(
+    async (changes, message) => {
+      setSaving(true)
+      setSaveError('')
+
+      try {
+        const data = await updateIncident(id, changes)
+        setIncident(data.incident)
+        setToast(message)
+      } catch (error) {
+        setSaveError(error.message)
+      } finally {
+        setSaving(false)
+      }
+    },
+    [id],
+  )
+
+  // An engineer may only work incidents assigned to them; an admin, any.
+  const canChangeStatus =
+    incident && (isAdmin || (isEngineer && incident.assignee_id === user.id))
+
+  // CLOSED is an admin's acceptance of the work, so it is absent from the
+  // engineer's options. The backend rejects it too.
+  const settableStatuses = isAdmin ? ADMIN_SETTABLE : ENGINEER_SETTABLE
+
   return (
     <Stack spacing={3}>
       <Box>
         <Button
           startIcon={<ArrowBackIcon />}
           component={RouterLink}
-          to="/incidents"
+          to={isAdmin ? '/admin/incidents' : '/incidents'}
           sx={{ mb: 1 }}
         >
-          Back to my incidents
+          {isAdmin ? 'Back to all incidents' : 'Back to my incidents'}
         </Button>
       </Box>
 
@@ -121,14 +207,15 @@ export default function IncidentDetailPage() {
               </Stack>
             </Box>
 
+            <WorkflowStepper status={incident.status} />
+
             <Divider />
 
             <Box>
               <Typography variant="subtitle2" gutterBottom>
                 Description
               </Typography>
-              {/* pre-wrap keeps the line breaks the reporter typed; without it
-                  a multi-paragraph description collapses into one block. */}
+              {/* pre-wrap keeps the line breaks the reporter typed. */}
               <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
                 {incident.description}
               </Typography>
@@ -138,14 +225,23 @@ export default function IncidentDetailPage() {
 
             <Box>
               <DetailRow label="Reference">#{incident.id}</DetailRow>
-              {/* Present for everyone, though it only tells an admin something
-                  they did not already know — an employee is always their own
-                  reporter. Keeping one response shape avoids a second page. */}
               <DetailRow label="Reported by">
                 {incident.reporter_name}
                 <Typography variant="caption" color="text.secondary" display="block">
                   {incident.reporter_email}
                 </Typography>
+              </DetailRow>
+              <DetailRow label="Assigned to">
+                {incident.assignee_name ? (
+                  <>
+                    {incident.assignee_name}
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      {incident.assignee_email}
+                    </Typography>
+                  </>
+                ) : (
+                  <em>Unassigned</em>
+                )}
               </DetailRow>
               <DetailRow label="Location">
                 {incident.location || <em>Not specified</em>}
@@ -153,9 +249,86 @@ export default function IncidentDetailPage() {
               <DetailRow label="Reported">{formatDateTime(incident.created_at)}</DetailRow>
               <DetailRow label="Last updated">{formatDateTime(incident.updated_at)}</DetailRow>
             </Box>
+
+            {(canChangeStatus || isAdmin) && (
+              <>
+                <Divider />
+                <Box>
+                  <Typography variant="subtitle2" gutterBottom>
+                    Update this incident
+                  </Typography>
+
+                  {saveError && (
+                    <Alert severity="error" sx={{ mb: 2 }}>
+                      {saveError}
+                    </Alert>
+                  )}
+
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                    {canChangeStatus && (
+                      <TextField
+                        select
+                        size="small"
+                        label="Status"
+                        value={incident.status}
+                        disabled={saving}
+                        sx={{ minWidth: 220 }}
+                        onChange={(event) =>
+                          save({ status: event.target.value }, 'Status updated.')
+                        }
+                      >
+                        {/* A closed incident keeps CLOSED visible in its own
+                            dropdown even for an engineer, so the current value
+                            renders — though they cannot reach this control on a
+                            closed ticket anyway. */}
+                        {settableStatuses.map((value) => (
+                          <MenuItem key={value} value={value}>
+                            {statusDisplay(value).label}
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                    )}
+
+                    {isAdmin && (
+                      <TextField
+                        select
+                        size="small"
+                        label="Assigned engineer"
+                        value={incident.assignee_id ?? ''}
+                        disabled={saving}
+                        sx={{ minWidth: 240 }}
+                        onChange={(event) =>
+                          save(
+                            { assignee_id: event.target.value === '' ? null : event.target.value },
+                            event.target.value === '' ? 'Incident unassigned.' : 'Incident assigned.',
+                          )
+                        }
+                        helperText="Only engineers can be assigned"
+                      >
+                        <MenuItem value="">
+                          <em>Unassigned</em>
+                        </MenuItem>
+                        {engineers.map((engineer) => (
+                          <MenuItem key={engineer.id} value={engineer.id}>
+                            {engineer.full_name}
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                    )}
+                  </Stack>
+                </Box>
+              </>
+            )}
           </Stack>
         </Paper>
       )}
+
+      <Snackbar
+        open={Boolean(toast)}
+        autoHideDuration={4000}
+        onClose={() => setToast('')}
+        message={toast}
+      />
     </Stack>
   )
 }

@@ -1,29 +1,31 @@
-"""Reporting and viewing facility incidents.
+"""Reporting, tracking, assigning and working facility incidents.
 
-Employees report a problem, then track it. This slice covers creating an
-incident and reading your own; assignment, notes and status changes belong to
-later slices.
+Three rules are enforced here rather than trusted from the client:
 
-Two rules are enforced here rather than trusted from the client:
+*The reporter is taken from the verified token*, never from the request body, so
+nobody can file an incident in a colleague's name.
 
-*The reporter is taken from the verified token*, never from the request body.
-Accepting a ``created_by`` field would let anyone file an incident in a
-colleague's name.
+*New incidents are always OPEN.* Status is not read from the body on create.
 
-*New incidents are always OPEN.* The status field is not read from the body at
-all, so a client cannot create something already marked RESOLVED.
+*Only an active ENGINEER can be an assignee*, checked against the database at the
+moment of assignment rather than trusting the dropdown the admin saw.
 
-Visibility is creator-scoped for every role in this slice — you see what you
-reported. Organisation-wide visibility for Facility Admins arrives with the
-admin slice, and building it now would mean half-implementing a feature whose
-requirements are not yet defined.
+Three lists, deliberately distinct — conflating them would lose an engineer sight
+of the broken tap they personally reported:
+
+    list_mine      incidents I reported          every role
+    list_assigned  work assigned to me           engineers only
+    list_all       the whole organisation        admins only
+
+Admins are never assignees. They can act on any incident without one, so an
+"assigned to me" queue would always be empty for them.
 """
 
 import logging
 from typing import Any
 
 from .. import db, security
-from ..errors import NotFoundError, ValidationError
+from ..errors import ForbiddenError, NotFoundError, ValidationError
 from ..http import Request, created, ok, require_text
 
 logger = logging.getLogger(__name__)
@@ -31,26 +33,52 @@ logger = logging.getLogger(__name__)
 CATEGORIES = ("TECHNOLOGY", "ELECTRICAL", "PLUMBING", "HVAC", "FURNITURE", "OTHER")
 PRIORITIES = ("LOW", "MEDIUM", "HIGH")
 
+STATUS_OPEN = "OPEN"
+STATUS_IN_PROGRESS = "IN_PROGRESS"
+STATUS_BLOCKED = "BLOCKED"
+STATUS_RESOLVED = "RESOLVED"
+STATUS_CLOSED = "CLOSED"
+
+STATUSES = (STATUS_OPEN, STATUS_IN_PROGRESS, STATUS_BLOCKED, STATUS_RESOLVED, STATUS_CLOSED)
+
+# The workflow expressed as two permission sets rather than a state machine.
+#
+# RESOLVED means "the engineer believes this is fixed, submitted for review";
+# CLOSED means "an admin reviewed it and accepted it". Because those are
+# decisions by different people, the rule is simply *who may set what* — no
+# transition graph is needed, and the admin's review outcomes fall out of it:
+# accept by setting CLOSED, or send back by setting OPEN or IN_PROGRESS.
+ENGINEER_SETTABLE_STATUSES = frozenset(
+    {STATUS_OPEN, STATUS_IN_PROGRESS, STATUS_BLOCKED, STATUS_RESOLVED}
+)
+ADMIN_SETTABLE_STATUSES = frozenset(STATUSES)
+
 DEFAULT_PRIORITY = "MEDIUM"
-INITIAL_STATUS = "OPEN"
+INITIAL_STATUS = STATUS_OPEN
 
 MAX_TITLE_LENGTH = 200
 MAX_DESCRIPTION_LENGTH = 5000
 MAX_LOCATION_LENGTH = 200
 
-# Listed explicitly rather than SELECT *, so adding an internal column later
-# cannot accidentally expose it through the API.
-_INCIDENT_COLUMNS = """
-    id, title, description, category, priority, status, location,
-    created_by, created_at, updated_at
-"""
-
-# The same fields plus who reported it, for the views where the reader is not
-# necessarily the reporter. Requires the join below.
-_INCIDENT_COLUMNS_WITH_REPORTER = """
-    i.id, i.title, i.description, i.category, i.priority, i.status, i.location,
-    i.created_by, i.created_at, i.updated_at,
-    u.full_name AS reporter_name, u.email AS reporter_email
+# One SELECT shared by every read, so all four endpoints return the same shape.
+#
+# The reporter join is inner — created_by is NOT NULL, so there is always one.
+# The assignee join is LEFT, because an unassigned incident must still appear;
+# an inner join would silently hide every incident awaiting triage.
+#
+# Columns are listed explicitly rather than SELECT *, so a sensitive column added
+# to either table by a future migration is excluded by default.
+_INCIDENT_SELECT = """
+    SELECT
+        i.id, i.title, i.description, i.category, i.priority, i.status, i.location,
+        i.created_by, i.assignee_id, i.created_at, i.updated_at,
+        reporter.full_name AS reporter_name,
+        reporter.email     AS reporter_email,
+        assignee.full_name AS assignee_name,
+        assignee.email     AS assignee_email
+    FROM incidents i
+    JOIN users reporter ON reporter.id = i.created_by
+    LEFT JOIN users assignee ON assignee.id = i.assignee_id
 """
 
 
@@ -59,9 +87,6 @@ def _require_choice(body: dict[str, Any], field: str, allowed: tuple[str, ...]) 
 
     Upper-cased before checking so the API accepts "plumbing" as well as
     "PLUMBING"; the database CHECK constraints only permit the canonical form.
-
-    Raises:
-        ValidationError: missing, or not one of ``allowed``.
     """
     value = body.get(field)
 
@@ -82,8 +107,8 @@ def _require_choice(body: dict[str, Any], field: str, allowed: tuple[str, ...]) 
 def _optional_text(body: dict[str, Any], field: str, max_length: int) -> str | None:
     """Read an optional string, returning None when absent or blank.
 
-    Blank is normalised to None so the database holds a real NULL rather than
-    an empty string, which keeps "no location given" a single condition to test.
+    Blank becomes None so the database holds a real NULL rather than an empty
+    string, keeping "no location given" a single condition to test.
     """
     value = body.get(field)
 
@@ -104,11 +129,25 @@ def _optional_text(body: dict[str, Any], field: str, max_length: int) -> str | N
     return value
 
 
-def create(request: Request) -> dict[str, Any]:
-    """Report a new incident.
+def _incident_id(request: Request) -> int:
+    """Read the {id} path parameter as a number.
 
-    Returns 201 with ``{"incident": {...}}``.
+    A non-numeric id is a 404 rather than a 400: it addresses nothing, and
+    reporting it differently would distinguish "malformed" from "not yours".
     """
+    try:
+        return int(request.path_params["id"])
+    except (KeyError, ValueError):
+        raise NotFoundError("Incident not found.")
+
+
+def _fetch(incident_id: int) -> dict[str, Any] | None:
+    """Load one incident in the standard response shape."""
+    return db.query_one(f"{_INCIDENT_SELECT} WHERE i.id = %s", (incident_id,))
+
+
+def create(request: Request) -> dict[str, Any]:
+    """Report a new incident. Returns 201 with ``{"incident": {...}}``."""
     body = request.json_body()
 
     title = require_text(body, "title", MAX_TITLE_LENGTH)
@@ -116,50 +155,53 @@ def create(request: Request) -> dict[str, Any]:
     category = _require_choice(body, "category", CATEGORIES)
     location = _optional_text(body, "location", MAX_LOCATION_LENGTH)
 
-    # Priority is optional; an employee reporting a problem should not be
-    # forced to triage it.
+    # Optional: someone reporting a problem should not be forced to triage it.
     priority = DEFAULT_PRIORITY
     if body.get("priority") is not None:
         priority = _require_choice(body, "priority", PRIORITIES)
 
-    # Note what is absent: nothing reads body["status"] or body["created_by"].
-    # The status is a constant and the reporter comes from the token the router
-    # already verified, so neither can be influenced by the request.
+    # Note what is absent: nothing reads body["status"], body["created_by"] or
+    # body["assignee_id"]. Status is a constant, the reporter comes from the
+    # token the router verified, and assignment is an admin action afterwards.
     row = db.query_one(
-        f"""
+        """
         INSERT INTO incidents (title, description, category, priority, status, location, created_by)
         VALUES (%s, %s, %s, %s, %s, %s, %s)
-        RETURNING {_INCIDENT_COLUMNS}
+        RETURNING id
         """,
-        (
-            title,
-            description,
-            category,
-            priority,
-            INITIAL_STATUS,
-            location,
-            request.user["id"],
-        ),
+        (title, description, category, priority, INITIAL_STATUS, location, request.user["id"]),
     )
 
     logger.info("User %s reported incident %s", request.user["id"], row["id"])
 
-    return created({"incident": row})
+    # Re-read through the shared SELECT so create returns exactly the shape the
+    # other endpoints do. RETURNING cannot perform the joins.
+    return created({"incident": _fetch(row["id"])})
 
 
 def list_mine(request: Request) -> dict[str, Any]:
-    """List the incidents the signed-in user reported, newest first.
+    """Incidents the signed-in user reported, newest first.
 
-    The WHERE clause is the authorization: there is no code path that returns
-    another user's incidents, so a filtering bug cannot leak them.
+    Creator-scoped for every role, permanently. The WHERE clause is the
+    authorization: no code path here returns another user's incidents.
     """
     rows = db.query_all(
-        f"""
-        SELECT {_INCIDENT_COLUMNS}
-        FROM incidents
-        WHERE created_by = %s
-        ORDER BY created_at DESC
-        """,
+        f"{_INCIDENT_SELECT} WHERE i.created_by = %s ORDER BY i.created_at DESC",
+        (request.user["id"],),
+    )
+
+    return ok({"incidents": rows})
+
+
+def list_assigned(request: Request) -> dict[str, Any]:
+    """The engineer's work queue: incidents assigned to them, newest first.
+
+    Restricted to ENGINEER by the route table. Separate from ``list_mine`` so an
+    engineer who reports a fault and is assigned a different one sees each in the
+    right place — and sees a ticket in both if they were assigned their own report.
+    """
+    rows = db.query_all(
+        f"{_INCIDENT_SELECT} WHERE i.assignee_id = %s ORDER BY i.created_at DESC",
         (request.user["id"],),
     )
 
@@ -167,70 +209,167 @@ def list_mine(request: Request) -> dict[str, Any]:
 
 
 def list_all(request: Request) -> dict[str, Any]:
-    """List every incident in the organisation, newest first.
+    """Every incident in the organisation, newest first.
 
-    The Facility Admin's oversight view, and the prerequisite for assigning
-    work in a later slice — you cannot assign what you cannot see. Access is
-    restricted to FACILITY_ADMIN by the route table, so there is no role check
-    here.
-
-    Distinct from ``list_mine``, which stays creator-scoped for every role
-    including admins. "My Incidents" means the same thing for everybody.
+    The Facility Admin's oversight view. Restricted to FACILITY_ADMIN by the
+    route table, so there is no role check here.
     """
-    rows = db.query_all(
-        f"""
-        SELECT {_INCIDENT_COLUMNS_WITH_REPORTER}
-        FROM incidents i
-        JOIN users u ON u.id = i.created_by
-        ORDER BY i.created_at DESC
-        """
-    )
+    rows = db.query_all(f"{_INCIDENT_SELECT} ORDER BY i.created_at DESC")
 
     return ok({"incidents": rows})
 
 
 def get_one(request: Request) -> dict[str, Any]:
-    """Return one incident: your own, or any incident if you are an admin.
+    """Return one incident: your own, one assigned to you, or any if an admin.
 
     Raises:
-        NotFoundError: the id is not a number, does not exist, or belongs to
-            someone else and the caller is not an admin. All three give the
-            same 404 deliberately — a 403 on the last case would confirm that
-            an incident with that id exists, letting someone probe ids to learn
-            how many have been filed.
+        NotFoundError: unknown id, or an incident the caller has no claim on.
+            A 403 would confirm it exists, letting someone probe ids.
     """
-    try:
-        incident_id = int(request.path_params["id"])
-    except (KeyError, ValueError):
-        raise NotFoundError("Incident not found.")
+    incident_id = _incident_id(request)
+    row = _fetch(incident_id)
 
-    is_admin = request.user["role"] == security.ROLE_FACILITY_ADMIN
-
-    # Entitlement is expressed in the WHERE clause rather than checked after
-    # fetching, so a row the caller may not see is never loaded at all. An
-    # admin's query simply omits the ownership condition.
-    if is_admin:
-        row = db.query_one(
-            f"""
-            SELECT {_INCIDENT_COLUMNS_WITH_REPORTER}
-            FROM incidents i
-            JOIN users u ON u.id = i.created_by
-            WHERE i.id = %s
-            """,
-            (incident_id,),
-        )
-    else:
-        row = db.query_one(
-            f"""
-            SELECT {_INCIDENT_COLUMNS_WITH_REPORTER}
-            FROM incidents i
-            JOIN users u ON u.id = i.created_by
-            WHERE i.id = %s AND i.created_by = %s
-            """,
-            (incident_id, request.user["id"]),
-        )
-
-    if row is None:
+    if row is None or not _may_view(request.user, row):
         raise NotFoundError("Incident not found.")
 
     return ok({"incident": row})
+
+
+def _may_view(user: dict[str, Any], incident: dict[str, Any]) -> bool:
+    """Whether this user may see this incident.
+
+    Three independent claims: you reported it, it is assigned to you, or you are
+    an admin overseeing everything.
+    """
+    if user["role"] == security.ROLE_FACILITY_ADMIN:
+        return True
+
+    return user["id"] in (incident["created_by"], incident["assignee_id"])
+
+
+def _resolve_assignee(body: dict[str, Any]) -> int | None:
+    """Validate the requested assignee and return their id, or None to unassign.
+
+    Only an **active user whose exact role is ENGINEER** may hold work. Checked
+    against the database here rather than trusted from the admin's dropdown: the
+    client could send any id, and a user's role may have changed since the page
+    loaded.
+
+    Admins are deliberately not assignable — they can act on any incident without
+    being assigned, so an assignment would add nothing.
+    """
+    value = body["assignee_id"]
+
+    # An explicit null means "unassign", which is a legitimate admin action.
+    if value is None:
+        return None
+
+    try:
+        assignee_id = int(value)
+    except (TypeError, ValueError):
+        raise ValidationError(
+            "Assignee must be a user id.", details={"field": "assignee_id"}
+        )
+
+    candidate = db.query_one(
+        "SELECT id, role, is_active FROM users WHERE id = %s", (assignee_id,)
+    )
+
+    if (
+        candidate is None
+        or not candidate["is_active"]
+        or candidate["role"] != security.ROLE_ENGINEER
+    ):
+        # One message for all three failures, so this cannot be used to probe
+        # which user ids exist or what roles they hold.
+        raise ValidationError(
+            "Incidents can only be assigned to an active engineer.",
+            details={"field": "assignee_id"},
+        )
+
+    return candidate["id"]
+
+
+def update(request: Request) -> dict[str, Any]:
+    """Change an incident's status, its assignee, or both.
+
+    Engineers may work incidents assigned to them; admins may act on any. The
+    route table already restricted this to those two roles, so the checks here
+    are about *which* incident and *which* status.
+
+    Raises:
+        NotFoundError: unknown incident, or one the caller has no claim on.
+        ForbiddenError: assigning without being an admin, setting a status the
+            caller's role may not set, or an engineer touching a closed ticket.
+        ValidationError: nothing to change, or an invalid status or assignee.
+    """
+    incident_id = _incident_id(request)
+    body = request.json_body()
+
+    is_admin = request.user["role"] == security.ROLE_FACILITY_ADMIN
+
+    current = db.query_one(
+        "SELECT id, status, assignee_id FROM incidents WHERE id = %s", (incident_id,)
+    )
+
+    if current is None:
+        raise NotFoundError("Incident not found.")
+
+    # An engineer may only touch their own assigned work. 404 rather than 403,
+    # consistent with get_one — we never confirm an incident exists to someone
+    # with no claim on it.
+    if not is_admin and current["assignee_id"] != request.user["id"]:
+        raise NotFoundError("Incident not found.")
+
+    # CLOSED is a Facility Admin's acceptance that the work is complete. An
+    # engineer must not be able to undo that; only an admin may reopen.
+    if not is_admin and current["status"] == STATUS_CLOSED:
+        raise ForbiddenError("This incident has been closed and can only be reopened by an admin.")
+
+    wants_status = "status" in body
+    wants_assignee = "assignee_id" in body
+
+    if not wants_status and not wants_assignee:
+        raise ValidationError("Provide a status or an assignee to change.")
+
+    # Reassignment is oversight, not fieldwork. Rejected outright rather than
+    # applying the status half of the request, so a refused call changes nothing.
+    if wants_assignee and not is_admin:
+        raise ForbiddenError("Only a Facility Admin can assign incidents.")
+
+    # Build the SET clause from a fixed set of fragments. Nothing from the
+    # request body ever becomes SQL text — only the values, as parameters.
+    assignments = ["updated_at = now()"]
+    params: list[Any] = []
+
+    if wants_status:
+        status = _require_choice(body, "status", STATUSES)
+        allowed = ADMIN_SETTABLE_STATUSES if is_admin else ENGINEER_SETTABLE_STATUSES
+
+        if status not in allowed:
+            # Reached when an engineer asks for CLOSED. 403 rather than 400: the
+            # value is valid, the caller simply may not set it.
+            raise ForbiddenError(f"Only a Facility Admin can set an incident to {status}.")
+
+        assignments.append("status = %s")
+        params.append(status)
+
+    if wants_assignee:
+        assignments.append("assignee_id = %s")
+        params.append(_resolve_assignee(body))
+
+    params.append(incident_id)
+
+    db.execute(
+        f"UPDATE incidents SET {', '.join(assignments)} WHERE id = %s", tuple(params)
+    )
+
+    logger.info(
+        "User %s updated incident %s (status=%s assignee=%s)",
+        request.user["id"],
+        incident_id,
+        body.get("status") if wants_status else "unchanged",
+        body.get("assignee_id") if wants_assignee else "unchanged",
+    )
+
+    return ok({"incident": _fetch(incident_id)})

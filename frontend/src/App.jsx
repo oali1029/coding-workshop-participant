@@ -19,6 +19,7 @@ import ProtectedRoute from './auth/ProtectedRoute'
 import AppLayout from './layout/AppLayout'
 import AdminIncidentsPage from './pages/AdminIncidentsPage'
 import AdminUsersPage from './pages/AdminUsersPage'
+import AssignedIncidentsPage from './pages/AssignedIncidentsPage'
 import HomePage from './pages/HomePage'
 import IncidentDetailPage from './pages/IncidentDetailPage'
 import LoginPage from './pages/LoginPage'
@@ -50,6 +51,10 @@ function App() {
                     page rather than an incident id. */}
                 <Route path="/incidents/new" element={<ReportIncidentPage />} />
                 <Route path="/incidents/:id" element={<IncidentDetailPage />} />
+                {/* Engineers only. The API refuses everyone else; the page
+                    simply shows the resulting error rather than guarding, since
+                    only engineers ever see the nav link. */}
+                <Route path="/assigned" element={<AssignedIncidentsPage />} />
                 <Route path="/status" element={<StatusPage />} />
 
                 {/* Facility Admin only. Nested inside AppLayout so these

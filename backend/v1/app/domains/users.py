@@ -42,6 +42,30 @@ def list_all(request: Request) -> dict[str, Any]:
     return ok({"users": rows})
 
 
+def list_engineers(request: Request) -> dict[str, Any]:
+    """List the people an incident can be assigned to.
+
+    Only active users whose exact role is ENGINEER. Admins are excluded: they
+    can act on any incident without being assigned one, so assigning to them
+    would add nothing.
+
+    This populates the admin's assignee dropdown, but the same rule is checked
+    again when an assignment is actually made — the dropdown is convenience, not
+    a control.
+    """
+    rows = db.query_all(
+        """
+        SELECT id, full_name, email
+        FROM users
+        WHERE role = %s AND is_active = TRUE
+        ORDER BY full_name
+        """,
+        (security.ROLE_ENGINEER,),
+    )
+
+    return ok({"engineers": rows})
+
+
 def set_role(request: Request) -> dict[str, Any]:
     """Promote an employee to engineer, or demote an engineer back.
 

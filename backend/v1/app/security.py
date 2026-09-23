@@ -50,6 +50,15 @@ ANY_AUTHENTICATED: frozenset[str] = ALL_ROLES
 #: For routes only a Facility Admin may call.
 FACILITY_ADMIN_ONLY: frozenset[str] = frozenset({ROLE_FACILITY_ADMIN})
 
+#: For the engineer work queue. Admins are excluded deliberately: they are never
+#: assignees, so the queue would always be empty for them. Their organisation-wide
+#: view is /admin/incidents instead.
+ENGINEER_ONLY: frozenset[str] = frozenset({ROLE_ENGINEER})
+
+#: For working on incidents. Which incidents, and which statuses, is then decided
+#: per request inside the handler.
+ENGINEER_OR_ADMIN: frozenset[str] = frozenset({ROLE_ENGINEER, ROLE_FACILITY_ADMIN})
+
 #: Only this domain may self-register. Enforced here, in the React form, and by
 #: a CHECK constraint on the users table. The form check is convenience only —
 #: anyone can call the API directly, which is why the backend check is the real

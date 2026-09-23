@@ -34,9 +34,26 @@ const STATUS_DISPLAY = {
   OPEN: { label: 'Open', color: 'info' },
   IN_PROGRESS: { label: 'In Progress', color: 'primary' },
   BLOCKED: { label: 'Blocked', color: 'error' },
-  RESOLVED: { label: 'Resolved', color: 'success' },
-  CLOSED: { label: 'Closed', color: 'default' },
+  // The stored value stays RESOLVED; only the wording changes. It means the
+  // engineer believes the work is done and has submitted it for admin review —
+  // not that the incident is finished. CLOSED is the finished state.
+  RESOLVED: { label: 'Resolved — awaiting review', color: 'warning' },
+  CLOSED: { label: 'Closed', color: 'success' },
 }
+
+// The happy path through the workflow, for the stepper on the detail page.
+// BLOCKED is deliberately absent: it is a state work can fall into at any point,
+// not a step along the way, so it is rendered as an error on the current step.
+export const WORKFLOW_ORDER = ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED']
+
+export const STATUS_BLOCKED = 'BLOCKED'
+export const STATUS_CLOSED = 'CLOSED'
+
+// Which statuses each role may set. Mirrors ENGINEER_SETTABLE_STATUSES and
+// ADMIN_SETTABLE_STATUSES in backend/v1/app/domains/incidents.py — the backend
+// re-checks, so this only decides what the dropdown offers.
+export const ENGINEER_SETTABLE = ['OPEN', 'IN_PROGRESS', 'BLOCKED', 'RESOLVED']
+export const ADMIN_SETTABLE = ['OPEN', 'IN_PROGRESS', 'BLOCKED', 'RESOLVED', 'CLOSED']
 
 const PRIORITY_DISPLAY = {
   LOW: { label: 'Low', color: 'default' },

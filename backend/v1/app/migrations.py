@@ -182,6 +182,28 @@ _MIGRATIONS: list[Migration] = [
             ON incidents (created_by, created_at DESC);
         """,
     ),
+    Migration(
+        version=4,
+        name="incident_assignment",
+        # Who is working the incident, as opposed to who reported it.
+        #
+        # Nullable because incidents arrive unassigned — reporting and triage are
+        # separate acts. No ON DELETE clause, matching created_by: PostgreSQL then
+        # refuses to delete a user still holding work, and accounts are disabled
+        # via is_active rather than deleted.
+        #
+        # Only users whose role is ENGINEER may be assigned. That is enforced in
+        # the handler rather than by a constraint, because a CHECK cannot read
+        # another table and a trigger would hide the rule from the code.
+        sql="""
+        ALTER TABLE incidents
+            ADD COLUMN IF NOT EXISTS assignee_id BIGINT REFERENCES users (id);
+
+        -- Serves the engineer work queue: one assignee's incidents, newest first.
+        CREATE INDEX IF NOT EXISTS incidents_assignee_idx
+            ON incidents (assignee_id, created_at DESC);
+        """,
+    ),
 ]
 
 

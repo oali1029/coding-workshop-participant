@@ -184,7 +184,27 @@ export function getIncident(id) {
   return get(`/incidents/${id}`)
 }
 
+/** An engineer's work queue: incidents assigned to them. Engineers only. */
+export function listAssignedIncidents() {
+  return get('/incidents/assigned')
+}
+
+/**
+ * Change an incident's status, its assignee, or both.
+ *
+ * Only fields that are present are changed. Engineers may set a status on their
+ * own assigned incidents; assignment is admin-only and re-validated server-side.
+ */
+export function updateIncident(id, changes) {
+  return patch(`/incidents/${id}`, changes)
+}
+
 // --- Facility Admin only. The backend refuses these for other roles. ---
+
+/** Users who can be assigned work: active, role ENGINEER. */
+export function listEngineers() {
+  return get('/engineers')
+}
 
 /** Every incident in the organisation, newest first, with reporter details. */
 export function listAllIncidents() {

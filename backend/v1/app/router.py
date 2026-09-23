@@ -65,12 +65,19 @@ ROUTES: list[Route] = [
     # actually see is decided per row inside the handlers, not here.
     Route("POST", "/incidents", incidents.create, roles=security.ANY_AUTHENTICATED),
     Route("GET", "/incidents", incidents.list_mine, roles=security.ANY_AUTHENTICATED),
+    # Must precede "/incidents/{id}": routes match in list order, and the
+    # placeholder would otherwise capture "assigned" as an incident id.
+    Route("GET", "/incidents/assigned", incidents.list_assigned, roles=security.ENGINEER_ONLY),
     Route("GET", "/incidents/{id}", incidents.get_one, roles=security.ANY_AUTHENTICATED),
+    # Engineers work their own assigned incidents, admins work any; the handler
+    # decides which, and which statuses each may set.
+    Route("PATCH", "/incidents/{id}", incidents.update, roles=security.ENGINEER_OR_ADMIN),
     # Facility Admin oversight and team management. Separate paths rather than
     # role-aware versions of the routes above, so the access rule is visible
     # here instead of buried in a handler.
     Route("GET", "/admin/incidents", incidents.list_all, roles=security.FACILITY_ADMIN_ONLY),
     Route("GET", "/users", users.list_all, roles=security.FACILITY_ADMIN_ONLY),
+    Route("GET", "/engineers", users.list_engineers, roles=security.FACILITY_ADMIN_ONLY),
     Route("PATCH", "/users/{id}/role", users.set_role, roles=security.FACILITY_ADMIN_ONLY),
 ]
 

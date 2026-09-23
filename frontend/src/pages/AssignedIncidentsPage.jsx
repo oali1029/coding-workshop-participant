@@ -1,9 +1,12 @@
 /**
- * All Incidents — the Facility Admin's organisation-wide view.
+ * Assigned Incidents — an engineer's work queue.
  *
- * Distinct from My Incidents, which stays creator-scoped for every role
- * including admins. This is the list an admin will assign work from in a
- * later slice.
+ * Distinct from My Incidents, which is what this person personally reported.
+ * An engineer who reports a fault and is assigned a different one sees each in
+ * its own place; a ticket they both reported and were assigned appears in both.
+ *
+ * Engineers only. Admins have no queue because they are never assignees — they
+ * oversee everything through All Incidents instead.
  */
 
 import { useEffect, useState } from 'react'
@@ -24,10 +27,10 @@ import {
 import { useMediaQuery } from 'react-responsive'
 import { useNavigate } from 'react-router-dom'
 
-import { listAllIncidents } from '../api/client'
+import { listAssignedIncidents } from '../api/client'
 import { categoryLabel, formatDateTime, priorityDisplay, statusDisplay } from '../incidents'
 
-export default function AdminIncidentsPage() {
+export default function AssignedIncidentsPage() {
   const [status, setStatus] = useState('loading')
   const [incidents, setIncidents] = useState([])
   const [errorMessage, setErrorMessage] = useState('')
@@ -40,7 +43,7 @@ export default function AdminIncidentsPage() {
 
     async function load() {
       try {
-        const data = await listAllIncidents()
+        const data = await listAssignedIncidents()
         if (!ignore) {
           setIncidents(data.incidents)
           setStatus('success')
@@ -64,10 +67,11 @@ export default function AdminIncidentsPage() {
     <Stack spacing={3}>
       <Box>
         <Typography variant="h5" component="h2" gutterBottom>
-          All incidents
+          Assigned to me
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          Every incident reported across the organisation, newest first.
+          Work assigned to you by a facility administrator. Open a ticket to
+          update its progress.
         </Typography>
       </Box>
 
@@ -81,8 +85,11 @@ export default function AdminIncidentsPage() {
 
       {status === 'success' && incidents.length === 0 && (
         <Paper variant="outlined" sx={{ p: 4, textAlign: 'center' }}>
+          <Typography variant="body1" gutterBottom>
+            Nothing assigned to you right now.
+          </Typography>
           <Typography variant="body2" color="text.secondary">
-            No incidents have been reported yet.
+            Tickets appear here once an administrator assigns them to you.
           </Typography>
         </Paper>
       )}
@@ -94,7 +101,6 @@ export default function AdminIncidentsPage() {
               <TableRow>
                 <TableCell>Title</TableCell>
                 <TableCell>Reported by</TableCell>
-                <TableCell>Assigned to</TableCell>
                 {!isCompact && <TableCell>Category</TableCell>}
                 <TableCell>Status</TableCell>
                 {!isCompact && <TableCell>Priority</TableCell>}
@@ -114,21 +120,7 @@ export default function AdminIncidentsPage() {
                     sx={{ cursor: 'pointer' }}
                   >
                     <TableCell>{incident.title}</TableCell>
-                    <TableCell>
-                      <Typography variant="body2">{incident.reporter_name}</Typography>
-                      {!isCompact && (
-                        <Typography variant="caption" color="text.secondary">
-                          {incident.reporter_email}
-                        </Typography>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {incident.assignee_name || (
-                        <Typography variant="body2" color="text.secondary">
-                          Unassigned
-                        </Typography>
-                      )}
-                    </TableCell>
+                    <TableCell>{incident.reporter_name}</TableCell>
                     {!isCompact && <TableCell>{categoryLabel(incident.category)}</TableCell>}
                     <TableCell>
                       <Chip size="small" label={statusChip.label} color={statusChip.color} />

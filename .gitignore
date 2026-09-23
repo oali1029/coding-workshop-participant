@@ -263,3 +263,7 @@ __pycache__/
 
 # Python test cache
 .pytest_cache/
+
+# Dependency cache marker written by bin/start-dev.sh: an md5 of a service's
+# requirements.txt, used to skip reinstalling when nothing has changed.
+backend/*/.pip_installed
