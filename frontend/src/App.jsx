@@ -13,9 +13,12 @@
 import { CssBaseline, ThemeProvider } from '@mui/material'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 
+import AdminRoute from './auth/AdminRoute'
 import AuthProvider from './auth/AuthProvider'
 import ProtectedRoute from './auth/ProtectedRoute'
 import AppLayout from './layout/AppLayout'
+import AdminIncidentsPage from './pages/AdminIncidentsPage'
+import AdminUsersPage from './pages/AdminUsersPage'
 import HomePage from './pages/HomePage'
 import IncidentDetailPage from './pages/IncidentDetailPage'
 import LoginPage from './pages/LoginPage'
@@ -48,6 +51,13 @@ function App() {
                 <Route path="/incidents/new" element={<ReportIncidentPage />} />
                 <Route path="/incidents/:id" element={<IncidentDetailPage />} />
                 <Route path="/status" element={<StatusPage />} />
+
+                {/* Facility Admin only. Nested inside AppLayout so these
+                    pages keep the same chrome as everything else. */}
+                <Route element={<AdminRoute />}>
+                  <Route path="/admin/incidents" element={<AdminIncidentsPage />} />
+                  <Route path="/admin/users" element={<AdminUsersPage />} />
+                </Route>
               </Route>
             </Route>
 

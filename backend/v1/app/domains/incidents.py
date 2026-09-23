@@ -22,7 +22,7 @@ requirements are not yet defined.
 import logging
 from typing import Any
 
-from .. import db
+from .. import db, security
 from ..errors import NotFoundError, ValidationError
 from ..http import Request, created, ok, require_text
 
@@ -43,6 +43,14 @@ MAX_LOCATION_LENGTH = 200
 _INCIDENT_COLUMNS = """
     id, title, description, category, priority, status, location,
     created_by, created_at, updated_at
+"""
+
+# The same fields plus who reported it, for the views where the reader is not
+# necessarily the reporter. Requires the join below.
+_INCIDENT_COLUMNS_WITH_REPORTER = """
+    i.id, i.title, i.description, i.category, i.priority, i.status, i.location,
+    i.created_by, i.created_at, i.updated_at,
+    u.full_name AS reporter_name, u.email AS reporter_email
 """
 
 
@@ -158,30 +166,69 @@ def list_mine(request: Request) -> dict[str, Any]:
     return ok({"incidents": rows})
 
 
+def list_all(request: Request) -> dict[str, Any]:
+    """List every incident in the organisation, newest first.
+
+    The Facility Admin's oversight view, and the prerequisite for assigning
+    work in a later slice — you cannot assign what you cannot see. Access is
+    restricted to FACILITY_ADMIN by the route table, so there is no role check
+    here.
+
+    Distinct from ``list_mine``, which stays creator-scoped for every role
+    including admins. "My Incidents" means the same thing for everybody.
+    """
+    rows = db.query_all(
+        f"""
+        SELECT {_INCIDENT_COLUMNS_WITH_REPORTER}
+        FROM incidents i
+        JOIN users u ON u.id = i.created_by
+        ORDER BY i.created_at DESC
+        """
+    )
+
+    return ok({"incidents": rows})
+
+
 def get_one(request: Request) -> dict[str, Any]:
-    """Return one incident the signed-in user reported.
+    """Return one incident: your own, or any incident if you are an admin.
 
     Raises:
         NotFoundError: the id is not a number, does not exist, or belongs to
-            someone else. All three give the same 404 deliberately — a 403 on
-            the last case would confirm that an incident with that id exists,
-            letting someone probe ids to learn how many have been filed.
+            someone else and the caller is not an admin. All three give the
+            same 404 deliberately — a 403 on the last case would confirm that
+            an incident with that id exists, letting someone probe ids to learn
+            how many have been filed.
     """
     try:
         incident_id = int(request.path_params["id"])
     except (KeyError, ValueError):
         raise NotFoundError("Incident not found.")
 
-    # Ownership is part of the query rather than a check afterwards, so the row
-    # is never loaded into memory unless the caller is entitled to it.
-    row = db.query_one(
-        f"""
-        SELECT {_INCIDENT_COLUMNS}
-        FROM incidents
-        WHERE id = %s AND created_by = %s
-        """,
-        (incident_id, request.user["id"]),
-    )
+    is_admin = request.user["role"] == security.ROLE_FACILITY_ADMIN
+
+    # Entitlement is expressed in the WHERE clause rather than checked after
+    # fetching, so a row the caller may not see is never loaded at all. An
+    # admin's query simply omits the ownership condition.
+    if is_admin:
+        row = db.query_one(
+            f"""
+            SELECT {_INCIDENT_COLUMNS_WITH_REPORTER}
+            FROM incidents i
+            JOIN users u ON u.id = i.created_by
+            WHERE i.id = %s
+            """,
+            (incident_id,),
+        )
+    else:
+        row = db.query_one(
+            f"""
+            SELECT {_INCIDENT_COLUMNS_WITH_REPORTER}
+            FROM incidents i
+            JOIN users u ON u.id = i.created_by
+            WHERE i.id = %s AND i.created_by = %s
+            """,
+            (incident_id, request.user["id"]),
+        )
 
     if row is None:
         raise NotFoundError("Incident not found.")

@@ -40,7 +40,15 @@ ROLE_FACILITY_ADMIN = "FACILITY_ADMIN"
 ALL_ROLES: frozenset[str] = frozenset({ROLE_EMPLOYEE, ROLE_ENGINEER, ROLE_FACILITY_ADMIN})
 
 #: For routes any signed-in user may call, whatever their role.
+#
+#: Roles are additive rather than exclusive: an Engineer is an employee with
+#: extra capabilities, not a separate kind of person. So employee-level routes
+#: list every role, and an engineer- or admin-only route simply lists fewer.
+#: Adding a capability never removes one.
 ANY_AUTHENTICATED: frozenset[str] = ALL_ROLES
+
+#: For routes only a Facility Admin may call.
+FACILITY_ADMIN_ONLY: frozenset[str] = frozenset({ROLE_FACILITY_ADMIN})
 
 #: Only this domain may self-register. Enforced here, in the React form, and by
 #: a CHECK constraint on the users table. The form check is convenience only —

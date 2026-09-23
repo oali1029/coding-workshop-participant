@@ -148,6 +148,40 @@ def second_user(unique_email):
 
 
 @pytest.fixture
+def engineer_user(unique_email):
+    """A signed-in ENGINEER.
+
+    Registration always produces an EMPLOYEE, so the role is set directly here
+    rather than through the API — this fixture is used by tests of *other*
+    endpoints, which should not depend on role management working.
+    """
+    from app.domains import auth
+
+    email = f"engineer-{unique_email}"
+    password = "EngineerPassw0rd!"
+
+    auth.register(
+        _make_request(
+            "POST",
+            "/auth/register",
+            body={"full_name": "Engineer Person", "email": email, "password": password},
+        )
+    )
+    db.execute(
+        "UPDATE users SET role = %s WHERE email = %s", (security.ROLE_ENGINEER, email)
+    )
+
+    # Sign in after the promotion so the returned token reflects the new role.
+    payload = _json(
+        auth.login(
+            _make_request("POST", "/auth/login", body={"email": email, "password": password})
+        )
+    )
+
+    return {"email": email, "token": payload["token"], "user": payload["user"]}
+
+
+@pytest.fixture
 def admin_token():
     """A token for the seeded FACILITY_ADMIN.
 

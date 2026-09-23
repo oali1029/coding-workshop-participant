@@ -138,6 +138,15 @@ export default function IncidentDetailPage() {
 
             <Box>
               <DetailRow label="Reference">#{incident.id}</DetailRow>
+              {/* Present for everyone, though it only tells an admin something
+                  they did not already know — an employee is always their own
+                  reporter. Keeping one response shape avoids a second page. */}
+              <DetailRow label="Reported by">
+                {incident.reporter_name}
+                <Typography variant="caption" color="text.secondary" display="block">
+                  {incident.reporter_email}
+                </Typography>
+              </DetailRow>
               <DetailRow label="Location">
                 {incident.location || <em>Not specified</em>}
               </DetailRow>

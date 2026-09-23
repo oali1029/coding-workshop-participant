@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from . import security
-from .domains import auth, health, incidents
+from .domains import auth, health, incidents, users
 from .errors import MethodNotAllowedError, NotFoundError
 from .http import Request
 
@@ -66,6 +66,12 @@ ROUTES: list[Route] = [
     Route("POST", "/incidents", incidents.create, roles=security.ANY_AUTHENTICATED),
     Route("GET", "/incidents", incidents.list_mine, roles=security.ANY_AUTHENTICATED),
     Route("GET", "/incidents/{id}", incidents.get_one, roles=security.ANY_AUTHENTICATED),
+    # Facility Admin oversight and team management. Separate paths rather than
+    # role-aware versions of the routes above, so the access rule is visible
+    # here instead of buried in a handler.
+    Route("GET", "/admin/incidents", incidents.list_all, roles=security.FACILITY_ADMIN_ONLY),
+    Route("GET", "/users", users.list_all, roles=security.FACILITY_ADMIN_ONLY),
+    Route("PATCH", "/users/{id}/role", users.set_role, roles=security.FACILITY_ADMIN_ONLY),
 ]
 
 

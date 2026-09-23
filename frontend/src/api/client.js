@@ -134,6 +134,11 @@ export function post(path, body, options) {
   return request(path, { ...options, method: 'POST', body })
 }
 
+/** Partial update of an existing record. */
+export function patch(path, body, options) {
+  return request(path, { ...options, method: 'PATCH', body })
+}
+
 // Named helpers per endpoint so URLs live in one file.
 
 /** Create an account. The backend always assigns the EMPLOYEE role. */
@@ -171,9 +176,33 @@ export function listIncidents() {
   return get('/incidents')
 }
 
-/** Fetch one incident. Returns 404 if it belongs to someone else. */
+/**
+ * Fetch one incident. Returns 404 if it belongs to someone else, unless the
+ * caller is a Facility Admin, who may open any incident.
+ */
 export function getIncident(id) {
   return get(`/incidents/${id}`)
+}
+
+// --- Facility Admin only. The backend refuses these for other roles. ---
+
+/** Every incident in the organisation, newest first, with reporter details. */
+export function listAllIncidents() {
+  return get('/admin/incidents')
+}
+
+/** Every user account. */
+export function listUsers() {
+  return get('/users')
+}
+
+/**
+ * Promote an employee to engineer, or demote one back.
+ *
+ * Only EMPLOYEE and ENGINEER are accepted; the backend rejects FACILITY_ADMIN.
+ */
+export function setUserRole(id, role) {
+  return patch(`/users/${id}/role`, { role })
 }
 
 // Shown in the status page so it is obvious which backend the site is calling.

@@ -242,20 +242,38 @@ class TestIncidentDetail:
         assert status == 404
         assert body["error"] == "not_found"
 
-    def test_an_admin_cannot_see_someone_elses_incident_in_this_slice(
-        self, invoke, registered_user, admin_token
-    ):
-        """Every role is creator-scoped for Slice 2, including FACILITY_ADMIN.
+    def test_an_admin_can_open_any_incident(self, invoke, registered_user, admin_token):
+        """Widened in Slice 3 so admins can oversee and later assign work.
 
-        Organisation-wide visibility is a later slice; this test records the
-        current rule so widening it later has to be a deliberate change.
+        Employees and engineers remain restricted to their own incidents; only
+        FACILITY_ADMIN is exempt.
+        """
+        _, made = invoke(
+            "POST", "/api/v1/incidents", VALID_INCIDENT, token=registered_user["token"]
+        )
+
+        status, body = invoke(
+            "GET", f"/api/v1/incidents/{made['incident']['id']}", token=admin_token
+        )
+
+        assert status == 200
+        assert body["incident"]["reporter_email"] == registered_user["email"]
+
+    def test_an_engineer_still_cannot_see_someone_elses_incident(
+        self, invoke, registered_user, engineer_user
+    ):
+        """Engineers gained no extra visibility in Slice 3.
+
+        An engineer is an employee with additional capabilities, and seeing
+        other people's reports is not one of them yet — assigned work arrives
+        as a separate list in a later slice.
         """
         _, made = invoke(
             "POST", "/api/v1/incidents", VALID_INCIDENT, token=registered_user["token"]
         )
 
         status, _ = invoke(
-            "GET", f"/api/v1/incidents/{made['incident']['id']}", token=admin_token
+            "GET", f"/api/v1/incidents/{made['incident']['id']}", token=engineer_user["token"]
         )
 
         assert status == 404

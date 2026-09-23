@@ -26,12 +26,16 @@ import { useMediaQuery } from 'react-responsive'
 import { Link as RouterLink, Outlet, useNavigate } from 'react-router-dom'
 
 import useAuth from '../auth/useAuth'
-import { roleLabel } from '../roles'
+import { ROLE_FACILITY_ADMIN, roleLabel } from '../roles'
 
 export default function AppLayout() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const isCompact = useMediaQuery({ maxWidth: 700 })
+
+  // Hiding admin links from other roles is presentation only — the endpoints
+  // behind them refuse non-admins regardless.
+  const isAdmin = user.role === ROLE_FACILITY_ADMIN
 
   function handleLogout() {
     logout()
@@ -62,6 +66,16 @@ export default function AppLayout() {
             {!isCompact && (
               <Button color="inherit" component={RouterLink} to="/incidents/new" size="small">
                 Report Issue
+              </Button>
+            )}
+            {isAdmin && (
+              <Button color="inherit" component={RouterLink} to="/admin/incidents" size="small">
+                {isCompact ? 'All' : 'All Incidents'}
+              </Button>
+            )}
+            {isAdmin && (
+              <Button color="inherit" component={RouterLink} to="/admin/users" size="small">
+                Users
               </Button>
             )}
           </Stack>
