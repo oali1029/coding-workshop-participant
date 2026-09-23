@@ -1,26 +1,16 @@
 /**
- * Global page styles.
+ * Global page styles, deliberately almost empty.
  *
- * This file is deliberately almost empty. The original Vite starter template
- * put a lot of styling here — a dark background, centred flexbox layout, and
- * custom button colours — which was appropriate for its demo page but actively
- * fights a real component library.
- *
- * We now use Material UI, which handles styling through its theme (see the
- * `createTheme` call in App.jsx) and resets browser inconsistencies with its
- * `CssBaseline` component. Leaving the template's rules here would override
- * that theme in unpredictable ways: every MUI button would inherit the
- * template's colours, and `display: flex` on the body would break page layout.
- *
- * The rule below is the one thing worth keeping globally, because it applies to
- * the page container itself rather than to any component.
+ * The Vite starter template put a dark background, a centred flexbox body and
+ * custom button colours here. Material UI now handles all of that through its
+ * theme and CssBaseline, and the template's rules would override both —
+ * `display: flex` on the body in particular breaks page layout.
  */
 
 html,
 body,
 #root {
-  /* Let the application fill the browser window, so a short page still paints
-     its background to the bottom of the screen rather than stopping partway. */
+  /* Fill the window so a short page still paints its background to the bottom. */
   min-height: 100vh;
   margin: 0;
 }

@@ -1,22 +1,10 @@
 /**
- * The sign-in screen.
+ * Sign-in screen.
  *
- * WHERE THIS SITS IN THE FLOW
- *     this form
- *       -> useAuth().login()
- *         -> api/client.js  POST /api/v1/auth/login
- *           -> Lambda router (public route, no token needed)
- *             -> domains/auth.login  verifies the password hash
- *               -> PostgreSQL
- *             <- {token, user}
- *         <- AuthProvider stores the token and sets status 'authenticated'
- *       -> this component redirects to wherever the user was heading
- *
- * NOTE ON ERROR MESSAGES
- * The backend intentionally answers "Invalid email or password." for both a
- * wrong password and an unknown address, so it cannot be used to discover which
- * employees have accounts. We show its message unchanged rather than trying to
- * be more helpful — being more specific here would undo that protection.
+ * The backend answers "Invalid email or password." for both a wrong password
+ * and an unknown address, so it cannot be used to discover which employees have
+ * accounts. We show its message unchanged rather than trying to be more
+ * helpful, which would undo that.
  */
 
 import { useState } from 'react'
@@ -46,16 +34,12 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
 
-  // Someone already signed in has no business on the login page — for example
-  // after pressing Back. Send them on instead of showing a form that would only
-  // sign them in as themselves again.
+  // Someone already signed in has no use for this page, e.g. after pressing Back.
   if (status === 'authenticated') {
     return <Navigate to="/" replace />
   }
 
   async function handleSubmit(event) {
-    // Without this the browser performs its own form submission and reloads the
-    // page, throwing away all React state mid-request.
     event.preventDefault()
 
     setSubmitting(true)
@@ -64,17 +48,13 @@ export default function LoginPage() {
     try {
       await login(email.trim(), password)
 
-      // ProtectedRoute stashed the page the user originally wanted in
-      // `location.state.from`. Returning them there is the difference between
-      // "sign in and carry on" and "sign in and go hunting for the page again".
-      const destination = location.state?.from?.pathname || '/'
-      navigate(destination, { replace: true })
+      // ProtectedRoute recorded where the user was heading, so sign-in resumes
+      // that journey rather than dropping everyone on the home page.
+      navigate(location.state?.from?.pathname || '/', { replace: true })
     } catch (error) {
       setErrorMessage(error.message)
     } finally {
-      // `finally` so the button is re-enabled on both success and failure. If
-      // this only ran on success, a failed attempt would leave the form frozen
-      // and the user unable to try again.
+      // Also on failure, or a rejected attempt would leave the form frozen.
       setSubmitting(false)
     }
   }
@@ -89,9 +69,8 @@ export default function LoginPage() {
       </Typography>
 
       <Paper variant="outlined" sx={{ p: { xs: 2.5, sm: 4 } }}>
-        {/* A real <form> element, not a div with a click handler. It gives us
-            Enter-to-submit, browser password-manager support and correct
-            screen-reader behaviour for free. */}
+        {/* A real <form>: gives Enter-to-submit, password-manager support and
+            correct screen-reader behaviour without extra code. */}
         <Box component="form" onSubmit={handleSubmit} noValidate>
           <Stack spacing={2.5}>
             {errorMessage && <Alert severity="error">{errorMessage}</Alert>}
@@ -104,8 +83,6 @@ export default function LoginPage() {
               required
               fullWidth
               autoFocus
-              // Tells password managers and mobile keyboards what this field is
-              // for, which is a genuine accessibility and usability win.
               autoComplete="email"
               disabled={submitting}
               placeholder="you@acme.inc"
@@ -127,8 +104,6 @@ export default function LoginPage() {
               variant="contained"
               size="large"
               fullWidth
-              // Disabled while the request is in flight so an impatient double
-              // click cannot fire two login attempts.
               disabled={submitting || !email || !password}
               startIcon={submitting ? <CircularProgress size={18} color="inherit" /> : null}
             >
@@ -137,8 +112,6 @@ export default function LoginPage() {
 
             <Typography variant="body2" align="center" color="text.secondary">
               No account?{' '}
-              {/* RouterLink navigates within the single-page app instead of
-                  reloading the whole thing from the server. */}
               <MuiLink component={RouterLink} to="/register">
                 Register with your ACME email
               </MuiLink>

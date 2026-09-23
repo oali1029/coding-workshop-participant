@@ -1,25 +1,13 @@
 /**
- * The self-registration screen.
+ * Self-registration screen.
  *
- * PRODUCT RULES ENFORCED HERE
- *   - Only @acme.inc addresses may register.
- *   - The password must be confirmed, to catch typing mistakes.
- *   - New accounts always receive the EMPLOYEE role.
+ * The checks in this file are convenience only — they give instant feedback
+ * instead of a round trip, but anyone can bypass the browser and post straight
+ * to the API. The backend repeats them and the database carries a CHECK
+ * constraint on the email domain. See backend/v1/app/domains/auth.py.
  *
- * WHICH OF THOSE ARE REAL
- * Only the third is enforced where it matters, and not by this file: the
- * backend hard-codes the role and never reads one from the request, so there is
- * no field here that could ask for anything else.
- *
- * The email and password checks in this file are CONVENIENCE ONLY. They give
- * instant feedback instead of a round trip, but anyone can skip the browser and
- * post straight to the API. The backend repeats both checks, and the database
- * carries a CHECK constraint on the email domain as a third layer. See
- * backend/v1/app/domains/auth.py.
- *
- * Client-side validation is therefore a usability feature, never a security
- * one — a distinction worth being precise about, because assuming otherwise is
- * one of the most common ways web applications get breached.
+ * There is no role selector, and adding one would achieve nothing: the backend
+ * never reads a role from the request and always assigns EMPLOYEE.
  */
 
 import { useState } from 'react'
@@ -39,11 +27,9 @@ import { Link as RouterLink, Navigate, useNavigate } from 'react-router-dom'
 
 import useAuth from '../auth/useAuth'
 
-// Must match MIN_PASSWORD_LENGTH in backend/v1/app/domains/auth.py. Duplicated
-// values like this are a maintenance risk; the alternative is an extra API call
-// just to fetch a number, which is not worth it for a constant that changes
-// roughly never. The backend remains the authority — if these ever disagree,
-// the server's answer is the one that counts.
+// Mirrors MIN_PASSWORD_LENGTH in backend/v1/app/domains/auth.py. Duplicated
+// rather than fetched, for a constant that changes roughly never; if they ever
+// disagree, the server's answer is the one that counts.
 const MIN_PASSWORD_LENGTH = 8
 const ACME_DOMAIN = '@acme.inc'
 
@@ -59,22 +45,14 @@ export default function RegisterPage() {
   })
   const [submitting, setSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
-
-  // Per-field messages, shown under the relevant input rather than all together
-  // at the top, so it is obvious which box needs attention.
   const [fieldErrors, setFieldErrors] = useState({})
 
   if (status === 'authenticated') {
     return <Navigate to="/" replace />
   }
 
-  /**
-   * One handler for every input, keyed by field name.
-   *
-   * Writing four near-identical handlers would be repetitive and easy to get
-   * wrong by copy-paste. Clearing that field's error as the user types gives
-   * immediate feedback that they have addressed it.
-   */
+  // One handler for all inputs; clearing the field's error as the user types
+  // confirms they have addressed it.
   function handleChange(field) {
     return (event) => {
       const { value } = event.target
@@ -83,11 +61,6 @@ export default function RegisterPage() {
     }
   }
 
-  /**
-   * Check the form before sending it.
-   *
-   * @returns {object} field name -> message, empty when everything is valid.
-   */
   function validate() {
     const errors = {}
 
@@ -99,8 +72,6 @@ export default function RegisterPage() {
     if (!email) {
       errors.email = 'Please enter your email address.'
     } else if (!email.endsWith(ACME_DOMAIN)) {
-      // Matches the backend rule, which compares the same way after
-      // lower-casing, so a capitalised domain is accepted in both places.
       errors.email = `Registration is restricted to ${ACME_DOMAIN} addresses.`
     }
 
@@ -108,9 +79,8 @@ export default function RegisterPage() {
       errors.password = `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`
     }
 
-    // The entire purpose of the confirm field: a mistyped password would
-    // otherwise lock someone out of an account they just created, with no way
-    // to discover what they actually typed.
+    // The whole point of the confirm field: a mistyped password would lock
+    // someone out of an account they just created.
     if (form.confirmPassword !== form.password) {
       errors.confirmPassword = 'Passwords do not match.'
     }
@@ -138,13 +108,11 @@ export default function RegisterPage() {
         password: form.password,
       })
 
-      // The backend signs the user in as part of registering, so there is no
-      // separate login step — go straight to the app.
+      // Registration returns a token, so there is no separate sign-in step.
       navigate('/', { replace: true })
     } catch (error) {
-      // The backend tells us which field it objected to when it can, for
-      // example a duplicate email. Placing the message on that field is far
-      // clearer than a generic banner.
+      // The backend names the offending field where it can (e.g. a duplicate
+      // email), which is clearer than a generic banner.
       if (error.details?.field) {
         setFieldErrors({ [error.details.field]: error.message })
       } else if (error.status === 409) {
@@ -195,7 +163,7 @@ export default function RegisterPage() {
               disabled={submitting}
               placeholder={`you${ACME_DOMAIN}`}
               error={Boolean(fieldErrors.email)}
-              // Show the rule up front rather than only after a failed attempt.
+              // State the rule up front rather than only after a failure.
               helperText={fieldErrors.email || `Must end in ${ACME_DOMAIN}`}
             />
 
@@ -206,9 +174,8 @@ export default function RegisterPage() {
               onChange={handleChange('password')}
               required
               fullWidth
-              // "new-password" specifically — it prompts password managers to
-              // offer to generate and save one, rather than autofilling an
-              // existing credential as "current-password" would.
+              // "new-password" prompts managers to generate and save one,
+              // rather than autofilling an existing credential.
               autoComplete="new-password"
               disabled={submitting}
               error={Boolean(fieldErrors.password)}

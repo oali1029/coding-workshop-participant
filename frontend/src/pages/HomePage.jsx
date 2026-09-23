@@ -1,20 +1,10 @@
 /**
- * The landing page after signing in.
+ * Authenticated landing page.
  *
- * SCOPE NOTE: for this slice it deliberately does one thing — confirm who is
- * signed in and with what role. The real per-role dashboards (open incidents,
- * engineer workload, reporting) come in a later slice. Building a placeholder
- * dashboard now would mean throwing it away, and would blur the line between
- * "authentication works" and "the product works".
- *
- * What it does demonstrate is that role information has travelled the whole way
- * from the database, through the token check, into the interface:
- *
- *     users.role in PostgreSQL
- *       -> GET /api/v1/auth/me
- *         -> AuthProvider
- *           -> useAuth()
- *             -> this page
+ * Intentionally minimal for this slice: it confirms who is signed in and with
+ * what role, demonstrating that role data travelled from the users table
+ * through the token check into the UI. Per-role dashboards belong to a later
+ * slice, and a placeholder now would only be thrown away.
  */
 
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
@@ -23,7 +13,6 @@ import { Alert, Box, Paper, Stack, Typography } from '@mui/material'
 import useAuth from '../auth/useAuth'
 import { roleLabel } from '../roles'
 
-/** What each role will be able to do once the later slices land. */
 const ROLE_DESCRIPTIONS = {
   EMPLOYEE:
     'You can report facility and workplace technology issues, track their progress, and add notes to your open tickets.',

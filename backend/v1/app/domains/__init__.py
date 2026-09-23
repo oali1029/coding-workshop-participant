@@ -1,37 +1,13 @@
-"""The features of the product, one module per area of the business.
+"""Product features, one module per area of the business.
 
-=============================================================================
-WHAT THIS FOLDER IS FOR
-=============================================================================
-Everything in the parent `app/` package is plumbing: connecting to a database,
-parsing AWS events, matching URLs. This folder is where the actual PRODUCT
-lives — the rules about incidents, facilities, engineers, and permissions.
+The parent package is plumbing — events, routing, database access. These
+modules hold the rules about incidents, facilities and permissions, so a
+question like "how does an employee report a fault?" can be answered from one
+file without wading through Lambda mechanics.
 
-Keeping the two apart is deliberate. Someone asking "how does an employee
-report a fault?" should be able to read one file here without wading through
-Lambda or database mechanics. Grouping by business area rather than by
-technical layer also means a change to one feature touches one file.
-
-=============================================================================
-THE SHAPE OF EVERY HANDLER IN THIS FOLDER
-=============================================================================
-Each module exposes plain functions with an identical signature:
-
-    def do_something(request: Request) -> dict:
-
-They take our own Request object (never a raw AWS event) and return a response
-built by the helpers in app/http.py. They are wired to URLs in app/router.py.
-
-Because they are ordinary functions taking ordinary arguments, they can be
-tested by constructing a Request directly — no AWS, no web server needed.
-
-=============================================================================
-WHAT EXISTS SO FAR
-=============================================================================
-    health   proves the system and its database are reachable (Slice 0).
-    auth     registration, login, and "who am I" (Slice 1).
-
-Later slices add users, facilities, engineers, incidents, notes and reports.
+Every handler takes an :class:`app.http.Request` and returns a response built
+by the helpers in ``app.http``, which means it can be tested by constructing a
+Request directly. Routes are wired to them in ``app.router``.
 """
 
 __all__ = ["auth", "health"]

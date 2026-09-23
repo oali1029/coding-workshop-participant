@@ -1,26 +1,10 @@
 /**
- * The system status page — Slice 0's health check, preserved.
+ * System status — the Slice 0 health check, now reached from the toolbar.
  *
- * This was the whole application in Slice 0. Now that there is a real product
- * behind a login, it has moved off the landing screen to /status, reachable
- * from the icon in the toolbar.
- *
- * IT IS STILL WORTH KEEPING. It is the fastest way to answer "is the deployment
- * actually working?", and it is the only screen that reports which environment
- * and which database the app is talking to. When something breaks after a
- * deploy, this is the first place to look:
- *
- *   - page will not load at all   -> the S3/CloudFront front end is broken
- *   - page loads, status errors   -> the Lambda or its database is broken
- *   - environment says "local"    -> the build picked up the wrong API address
- *
- * THE THREE STATES OF ANY SCREEN THAT LOADS DATA
- * Network calls take time and can fail, so every data-loading screen in this
- * project handles all three cases explicitly rather than showing a blank panel:
- *
- *   LOADING   request in flight  -> spinner
- *   ERROR     request failed     -> explain, and offer to retry
- *   SUCCESS   data arrived       -> show it
+ * Still the quickest way to diagnose a bad deployment:
+ *   page will not load      -> S3/CloudFront is broken
+ *   page loads, status errors -> the Lambda or its database is broken
+ *   environment says "local"  -> the build picked up the wrong API address
  */
 
 import { useCallback, useEffect, useState } from 'react'
@@ -37,17 +21,9 @@ import {
 
 import { apiBaseUrl, getHealth } from '../api/client'
 
-/**
- * One labelled line of information, e.g. "Environment: aws".
- *
- * Extracted because it is used four times below. Reusing it keeps the rows
- * visually identical and is the habit that prevents duplicated markup later.
- */
 function DetailRow({ label, children }) {
   return (
     <Stack
-      // Stack label above value on a phone so long text is not squeezed into a
-      // sliver; side by side once there is room.
       direction={{ xs: 'column', sm: 'row' }}
       spacing={{ xs: 0.5, sm: 2 }}
       sx={{ py: 1.5, borderBottom: '1px solid', borderColor: 'divider' }}
@@ -55,8 +31,7 @@ function DetailRow({ label, children }) {
       <Typography variant="body2" color="text.secondary" sx={{ minWidth: 160 }}>
         {label}
       </Typography>
-      {/* `wordBreak` stops the long PostgreSQL version string forcing the page
-          wider than a phone screen and causing sideways scrolling. */}
+      {/* Stops the long PostgreSQL version string forcing horizontal scroll. */}
       <Typography variant="body2" sx={{ wordBreak: 'break-word' }}>
         {children}
       </Typography>
@@ -69,18 +44,10 @@ export default function StatusPage() {
   const [health, setHealth] = useState(null)
   const [errorMessage, setErrorMessage] = useState('')
 
-  // Incremented by "Try again". The effect below depends on it, so changing it
-  // is what re-runs the request. This indirection keeps all network access
-  // inside the effect, where React manages its lifecycle.
+  // Changing this re-runs the effect, which keeps the request inside the effect
+  // rather than firing it from the retry handler.
   const [reloadToken, setReloadToken] = useState(0)
 
-  /**
-   * Fetch the health status when the page opens, and whenever retried.
-   *
-   * The `ignore` flag is a cleanup guard: if the user navigates away while the
-   * request is still travelling, the late response must not write to state for
-   * a component that no longer exists.
-   */
   useEffect(() => {
     let ignore = false
 
@@ -162,12 +129,10 @@ export default function StatusPage() {
               {health.environment === 'aws' ? 'AWS (deployed)' : 'Local development'}
             </DetailRow>
 
-            {/* Proof the Lambda genuinely queried PostgreSQL. On AWS this
-                string mentions Aurora, Amazon's managed PostgreSQL. */}
+            {/* Mentions Aurora when genuinely deployed. */}
             <DetailRow label="Database">{health.database}</DetailRow>
 
-            {/* Which migration has been applied. A deployment that failed to
-                update the schema would show an older number here. */}
+            {/* Lags behind if a deployment failed to migrate. */}
             <DetailRow label="Schema version">{health.schema_version}</DetailRow>
 
             <DetailRow label="API address">{apiBaseUrl}</DetailRow>

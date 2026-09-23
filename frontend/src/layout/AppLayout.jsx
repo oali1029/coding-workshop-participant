@@ -1,20 +1,11 @@
 /**
- * The frame every signed-in page is rendered inside.
+ * Frame for every signed-in page: top bar, user identity, sign-out, and the
+ * current page rendered via <Outlet />.
  *
- * Holds the top bar, the navigation links, the signed-in user's identity and
- * the sign-out button, then renders the current page beneath via `<Outlet />`.
- *
- * Putting this in one place means a page component only has to describe its own
- * content; it never repeats the header or worries about the logout button.
- *
- * RESPONSIVENESS
- * The bar adapts at phone width in two different ways, chosen deliberately:
- *
- *   - Layout changes (spacing, which text is shown) use MUI's `sx` breakpoints,
- *     because those are pure CSS and cost nothing.
- *   - Changes to what is RENDERED at all use `react-responsive`'s
- *     `useMediaQuery`, because that is a JavaScript decision. On a phone the
- *     role is shown as a compact chip and the navigation collapses to icons.
+ * Responsiveness is split deliberately. Layout adjustments use MUI's `sx`
+ * breakpoints, which are plain CSS. Changes to what is *rendered at all* use
+ * react-responsive, because that is a JavaScript decision — on a phone the name
+ * is dropped and the sign-out button becomes an icon.
  */
 
 import LogoutIcon from '@mui/icons-material/Logout'
@@ -44,9 +35,8 @@ export default function AppLayout() {
 
   function handleLogout() {
     logout()
-    // Send the user to the login screen explicitly. ProtectedRoute would also
-    // redirect them, but doing it here makes the outcome of pressing the button
-    // obvious rather than an indirect consequence.
+    // ProtectedRoute would redirect anyway, but navigating explicitly makes the
+    // button's effect immediate and obvious.
     navigate('/login', { replace: true })
   }
 
@@ -59,25 +49,22 @@ export default function AppLayout() {
           </Typography>
 
           <Stack direction="row" spacing={isCompact ? 0.5 : 1.5} alignItems="center">
-            {/* The system status page from Slice 0 is preserved, demoted to an
-                icon in the toolbar so it stays reachable without competing with
-                the product itself. */}
+            {/* The Slice 0 status page, kept reachable without competing with
+                the product for space. */}
             <Tooltip title="System status">
               <IconButton color="inherit" onClick={() => navigate('/status')} size="small">
                 <MonitorHeartIcon />
               </IconButton>
             </Tooltip>
 
-            {/* Role awareness in the UI. For this slice that is all it does —
-                display. It grants nothing; the backend decides permissions. */}
+            {/* Display only — it grants nothing; the backend decides access. */}
             <Chip
               label={roleLabel(user.role)}
               size="small"
               sx={{ bgcolor: 'rgba(255,255,255,0.18)', color: 'inherit', fontWeight: 600 }}
             />
 
-            {/* The name is the widest element here, so it is the first thing
-                dropped when space is tight. */}
+            {/* Widest element, so the first dropped when space is tight. */}
             {!isCompact && (
               <Typography variant="body2" sx={{ maxWidth: 220 }} noWrap>
                 {user.full_name}
@@ -100,7 +87,6 @@ export default function AppLayout() {
       </AppBar>
 
       <Container maxWidth="md" sx={{ py: 4 }}>
-        {/* Whichever protected page matched the current URL renders here. */}
         <Outlet />
       </Container>
     </Box>

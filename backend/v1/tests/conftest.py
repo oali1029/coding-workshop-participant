@@ -1,28 +1,13 @@
-"""Shared setup for the test suite.
+"""Shared test setup.
 
-=============================================================================
-WHAT KIND OF TESTS THESE ARE
-=============================================================================
-These are INTEGRATION tests: they run against a real PostgreSQL database
-rather than a fake one.
+These are integration tests against a real PostgreSQL database. The behaviour
+most worth verifying here is exactly what a mock would paper over — that the
+UNIQUE constraint rejects duplicate emails, that the CHECK constraint rejects
+non-ACME addresses, that ON CONFLICT DO NOTHING behaves as the code assumes.
+They read the same POSTGRES_* variables as the application.
 
-That is a deliberate choice. The most valuable things to verify in this
-application are precisely the things a mock would paper over — that the UNIQUE
-constraint really does reject a duplicate email, that the CHECK constraint
-really does reject a non-ACME address, that `ON CONFLICT DO NOTHING` behaves as
-the code assumes. A mocked database would happily agree with whatever we told
-it and prove nothing.
-
-The cost is that the tests need a database to talk to. They read the same
-POSTGRES_* environment variables the application does, so they point at the
-local PostgreSQL by default.
-
-=============================================================================
-HOW TESTS AVOID INTERFERING WITH EACH OTHER
-=============================================================================
-Every test account is created with an address containing a marker string, and
-the fixtures delete all such rows before and after the run. Real accounts,
-including the seeded administrator, are left untouched.
+Test accounts all carry a marker in their email address so the fixtures can
+clean up without touching real rows.
 """
 
 import os
@@ -31,10 +16,8 @@ import uuid
 
 import pytest
 
-# The tests live in backend/v1/tests/ but import `app` and `function`, which sit
-# in backend/v1/. Adding the parent directory to the import path makes those
-# importable without installing the project as a package — which would be
-# overkill here, since Lambda also just unzips these files side by side.
+# Tests live in tests/ but import `app` and `function` from the parent, which
+# Lambda also loads side by side rather than as an installed package.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Point at the local database unless the environment already says otherwise.
@@ -64,12 +47,7 @@ TEST_EMAIL_MARKER = "+pytest-"
 
 @pytest.fixture(scope="session", autouse=True)
 def prepared_database():
-    """Ensure the schema exists, and remove test rows before and after the run.
-
-    `scope="session"` means this runs once for the whole suite rather than per
-    test, because migrating is not cheap and the schema does not change.
-    `autouse=True` means every test gets it without having to ask.
-    """
+    """Migrate once per session, and clean test rows either side of the run."""
     migrations.run_migrations()
 
     # Remove any administrator left over from a previous run so that the account
@@ -93,16 +71,8 @@ def _delete_test_users() -> None:
 
 @pytest.fixture
 def unique_email():
-    """Return a fresh, unused ACME address for a test to register.
-
-    A random component is included so that tests remain independent: a leftover
-    row from an interrupted earlier run cannot collide with this one and cause a
-    confusing "email already exists" failure in an unrelated test.
-
-    The "+tag" form is standard email sub-addressing, and keeps the address
-    valid while still ending in @acme.inc so it passes both the application
-    check and the database CHECK constraint.
-    """
+    """A fresh ACME address, randomised so a leftover row from an interrupted
+    run cannot collide and fail an unrelated test."""
     return f"user{TEST_EMAIL_MARKER}{uuid.uuid4().hex[:10]}@acme.inc"
 
 
@@ -143,11 +113,7 @@ def registered_user(unique_email):
 # Helpers shared by the test modules
 # ---------------------------------------------------------------------------
 def _make_request(method, path, body=None, headers=None):
-    """Build an app.http.Request directly, with no AWS event involved.
-
-    Handlers take a plain Request object, so they can be called in isolation.
-    Tests that want to exercise the full Lambda path use `invoke` instead.
-    """
+    """Build a Request directly, bypassing the AWS event format."""
     from app.http import Request
 
     return Request(
@@ -166,26 +132,11 @@ def _json(response):
 
 
 @pytest.fixture
-def make_request():
-    """Expose `_make_request` to tests as a fixture."""
-    return _make_request
-
-
-@pytest.fixture
-def read_json():
-    """Expose `_json` to tests as a fixture."""
-    return _json
-
-
-@pytest.fixture
 def invoke():
     """Call the real Lambda handler with a synthetic Function URL event.
 
-    This exercises the COMPLETE path — event parsing, prefix stripping,
-    routing, authentication, the handler, and error formatting — which is what
-    we need in order to assert on status codes such as 401 and 403. Calling a
-    handler directly would bypass the router, and the router is where the
-    permission checks live.
+    Exercises the full path including the router, which is where authentication
+    and role checks happen — calling a handler directly would skip them.
     """
     from function import handler
 
@@ -205,6 +156,3 @@ def invoke():
         return response["statusCode"], _json(response)
 
     return _invoke
-
-
-__all__ = ["security"]

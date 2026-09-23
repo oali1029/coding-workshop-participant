@@ -1,14 +1,9 @@
 /**
- * The hook components use to read the signed-in user.
+ * Read the signed-in user: `const { user, logout } = useAuth()`.
  *
- * Usage:
- *     const { user, logout } = useAuth()
- *
- * Wrapping `useContext` rather than exposing the context directly buys one
- * important thing: a clear error when a component is rendered outside the
- * provider. Without this check, `user` would silently be null and the bug would
- * show up much later as a confusing "cannot read property of null" somewhere
- * unrelated.
+ * Wrapping useContext gives a clear error when a component is rendered outside
+ * the provider, instead of a null `user` surfacing much later as an unrelated
+ * crash.
  */
 
 import { useContext } from 'react'

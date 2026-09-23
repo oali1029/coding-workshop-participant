@@ -1,19 +1,10 @@
 /**
- * A route wrapper that only renders its children for a signed-in user.
+ * Renders child routes only for a signed-in user, redirecting to /login
+ * otherwise.
  *
- * Used in App.jsx like this:
- *
- *     <Route element={<ProtectedRoute />}>
- *       <Route path="/" element={<HomePage />} />
- *     </Route>
- *
- * `<Outlet />` is where React Router renders whichever child route matched.
- *
- * WHAT THIS IS AND IS NOT FOR
- * It stops someone seeing a broken, empty page by typing a URL while signed
- * out, and sends them somewhere useful instead. It is NOT a security control —
- * the data those pages display comes from an API that checks the token itself.
- * Anyone can edit the JavaScript to bypass this; nobody can bypass the backend.
+ * A usability guard, not a security control — it stops someone landing on an
+ * empty broken page by typing a URL. The data those pages show comes from an
+ * API that verifies the token itself.
  */
 
 import { Box, CircularProgress } from '@mui/material'
@@ -25,9 +16,8 @@ export default function ProtectedRoute() {
   const { status } = useAuth()
   const location = useLocation()
 
-  // Still checking a stored token. Waiting here rather than redirecting is what
-  // prevents a refresh from flashing the login screen before landing back on
-  // the page the user was already on. See the explanation in AuthProvider.jsx.
+  // Waiting rather than redirecting is what stops a refresh flashing the login
+  // screen before returning to the page the user was already on.
   if (status === 'loading') {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', mt: 8 }}>
@@ -37,12 +27,8 @@ export default function ProtectedRoute() {
   }
 
   if (status === 'anonymous') {
-    // `state={{ from: location }}` remembers where they were trying to go, so
-    // LoginPage can send them straight there after a successful sign-in rather
-    // than dumping everyone on the home page.
-    //
-    // `replace` swaps this entry in the browser history instead of adding one,
-    // so pressing Back does not return to a page they cannot view.
+    // `from` lets LoginPage return the user to where they were heading.
+    // `replace` keeps an unviewable page out of history.
     return <Navigate to="/login" state={{ from: location }} replace />
   }
 
