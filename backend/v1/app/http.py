@@ -65,6 +65,32 @@ class Request:
         return self.headers.get(name.lower(), default)
 
 
+def require_text(body: dict[str, Any], field: str, max_length: int) -> str:
+    """Read a required, trimmed, length-limited string from a request body.
+
+    Shared by every handler that accepts text input, so the validation and the
+    error shape stay identical across the API. ``details`` names the offending
+    field, which is what lets a form highlight the right input.
+
+    Raises:
+        ValidationError: missing, not a string, blank, or too long.
+    """
+    value = body.get(field)
+
+    if not isinstance(value, str) or not value.strip():
+        raise ValidationError("This field is required.", details={"field": field})
+
+    value = value.strip()
+
+    if len(value) > max_length:
+        raise ValidationError(
+            f"This field must be {max_length} characters or fewer.",
+            details={"field": field},
+        )
+
+    return value
+
+
 def _decode_body(event: dict[str, Any]) -> tuple[Any, str]:
     """Decode the event body, undoing base64 first when AWS applied it.
 

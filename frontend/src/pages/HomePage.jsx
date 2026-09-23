@@ -7,8 +7,11 @@
  * slice, and a placeholder now would only be thrown away.
  */
 
+import AddIcon from '@mui/icons-material/Add'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
-import { Alert, Box, Paper, Stack, Typography } from '@mui/material'
+import ListAltIcon from '@mui/icons-material/ListAlt'
+import { Box, Button, Paper, Stack, Typography } from '@mui/material'
+import { Link as RouterLink } from 'react-router-dom'
 
 import useAuth from '../auth/useAuth'
 import { roleLabel } from '../roles'
@@ -53,11 +56,24 @@ export default function HomePage() {
         </Stack>
       </Paper>
 
-      <Alert severity="info">
-        Incident reporting, facilities management and dashboards are not built
-        yet. This slice delivers sign-in, roles and permissions — the foundation
-        everything else depends on.
-      </Alert>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+        <Button
+          variant="contained"
+          startIcon={<AddIcon />}
+          component={RouterLink}
+          to="/incidents/new"
+        >
+          Report an issue
+        </Button>
+        <Button
+          variant="outlined"
+          startIcon={<ListAltIcon />}
+          component={RouterLink}
+          to="/incidents"
+        >
+          View my incidents
+        </Button>
+      </Stack>
     </Stack>
   )
 }

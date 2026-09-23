@@ -17,8 +17,11 @@ import AuthProvider from './auth/AuthProvider'
 import ProtectedRoute from './auth/ProtectedRoute'
 import AppLayout from './layout/AppLayout'
 import HomePage from './pages/HomePage'
+import IncidentDetailPage from './pages/IncidentDetailPage'
 import LoginPage from './pages/LoginPage'
+import MyIncidentsPage from './pages/MyIncidentsPage'
 import RegisterPage from './pages/RegisterPage'
+import ReportIncidentPage from './pages/ReportIncidentPage'
 import StatusPage from './pages/StatusPage'
 import theme from './theme'
 
@@ -39,6 +42,11 @@ function App() {
             <Route element={<ProtectedRoute />}>
               <Route element={<AppLayout />}>
                 <Route path="/" element={<HomePage />} />
+                <Route path="/incidents" element={<MyIncidentsPage />} />
+                {/* Declared before "/incidents/:id" so "new" is treated as a
+                    page rather than an incident id. */}
+                <Route path="/incidents/new" element={<ReportIncidentPage />} />
+                <Route path="/incidents/:id" element={<IncidentDetailPage />} />
                 <Route path="/status" element={<StatusPage />} />
               </Route>
             </Route>

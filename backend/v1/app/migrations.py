@@ -139,6 +139,49 @@ _MIGRATIONS: list[Migration] = [
         # The administrator is seeded by ensure_bootstrap_admin() on every
         # startup instead of here — see that function.
     ),
+    Migration(
+        version=3,
+        name="incidents",
+        # Facility and workplace-technology issues reported by staff.
+        #
+        # location is deliberately free text for now. The real building / floor
+        # / seat model arrives in a later slice; modelling it early would mean
+        # guessing at a schema before the requirements for it are built.
+        #
+        # created_by is a foreign key with no ON DELETE clause, so PostgreSQL
+        # refuses to delete a user who still has incidents. That is the
+        # behaviour we want: incident history should outlive an account, and
+        # accounts are disabled via users.is_active rather than deleted.
+        #
+        # The CHECK constraints list every status the product will eventually
+        # use, not just the one reachable today, so later slices can move
+        # incidents through the workflow without another migration.
+        sql="""
+        CREATE TABLE IF NOT EXISTS incidents (
+            id          BIGSERIAL PRIMARY KEY,
+            title       TEXT NOT NULL,
+            description TEXT NOT NULL,
+            category    TEXT NOT NULL,
+            priority    TEXT NOT NULL DEFAULT 'MEDIUM',
+            status      TEXT NOT NULL DEFAULT 'OPEN',
+            location    TEXT,
+            created_by  BIGINT NOT NULL REFERENCES users (id),
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CONSTRAINT incidents_category_valid CHECK (category IN
+                ('TECHNOLOGY', 'ELECTRICAL', 'PLUMBING', 'HVAC', 'FURNITURE', 'OTHER')),
+            CONSTRAINT incidents_priority_valid CHECK (priority IN
+                ('LOW', 'MEDIUM', 'HIGH')),
+            CONSTRAINT incidents_status_valid CHECK (status IN
+                ('OPEN', 'IN_PROGRESS', 'BLOCKED', 'RESOLVED', 'CLOSED'))
+        );
+
+        -- Serves the only list query this slice has: one user's incidents,
+        -- newest first. A composite index covers both the filter and the sort.
+        CREATE INDEX IF NOT EXISTS incidents_created_by_idx
+            ON incidents (created_by, created_at DESC);
+        """,
+    ),
 ]
 
 

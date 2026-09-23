@@ -65,7 +65,20 @@ def prepared_database():
 
 
 def _delete_test_users() -> None:
-    """Remove only the accounts this suite created."""
+    """Remove the accounts this suite created, and anything referencing them.
+
+    incidents.created_by is a foreign key with no ON DELETE rule, so PostgreSQL
+    refuses to delete a user who still has incidents — deliberately, since
+    incident history should outlive an account. Tests therefore clear their
+    incidents first.
+    """
+    db.execute(
+        """
+        DELETE FROM incidents
+        WHERE created_by IN (SELECT id FROM users WHERE email LIKE %s)
+        """,
+        (f"%{TEST_EMAIL_MARKER}%",),
+    )
     db.execute("DELETE FROM users WHERE email LIKE %s", (f"%{TEST_EMAIL_MARKER}%",))
 
 
@@ -107,6 +120,52 @@ def registered_user(unique_email):
         "token": payload["token"],
         "user": payload["user"],
     }
+
+
+@pytest.fixture
+def second_user(unique_email):
+    """A different signed-in employee, for testing that users cannot see each
+    other's data."""
+    from app.domains import auth
+
+    password = "OtherPassw0rd!"
+    response = auth.register(
+        _make_request(
+            "POST",
+            "/auth/register",
+            body={
+                "full_name": "Other Person",
+                # unique_email is per-test, so prefix it to get a second
+                # distinct address within the same test.
+                "email": f"second-{unique_email}",
+                "password": password,
+            },
+        )
+    )
+    payload = _json(response)
+
+    return {"email": f"second-{unique_email}", "token": payload["token"], "user": payload["user"]}
+
+
+@pytest.fixture
+def admin_token():
+    """A token for the seeded FACILITY_ADMIN.
+
+    Used to confirm that admins are creator-scoped too in this slice.
+    """
+    from app.domains import auth
+
+    response = auth.login(
+        _make_request(
+            "POST",
+            "/auth/login",
+            body={
+                "email": security.SEED_ADMIN_EMAIL,
+                "password": BOOTSTRAP_ADMIN_TEST_PASSWORD,
+            },
+        )
+    )
+    return _json(response)["token"]
 
 
 # ---------------------------------------------------------------------------

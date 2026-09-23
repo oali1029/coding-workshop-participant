@@ -155,5 +155,26 @@ export function getHealth() {
   return get('/health', { auth: false })
 }
 
+/**
+ * Report a new incident.
+ *
+ * Only these five fields are sent. Status and reporter are set by the backend
+ * from the verified token, and sending them would achieve nothing — see
+ * backend/v1/app/domains/incidents.py.
+ */
+export function createIncident({ title, description, category, priority, location }) {
+  return post('/incidents', { title, description, category, priority, location })
+}
+
+/** List the incidents the signed-in user reported, newest first. */
+export function listIncidents() {
+  return get('/incidents')
+}
+
+/** Fetch one incident. Returns 404 if it belongs to someone else. */
+export function getIncident(id) {
+  return get(`/incidents/${id}`)
+}
+
 // Shown in the status page so it is obvious which backend the site is calling.
 export const apiBaseUrl = `${API_BASE}${API_PREFIX}`

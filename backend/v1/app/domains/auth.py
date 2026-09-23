@@ -21,7 +21,7 @@ from typing import Any
 
 from .. import db, security
 from ..errors import ConflictError, UnauthorizedError, ValidationError
-from ..http import Request, created, ok
+from ..http import Request, created, ok, require_text
 
 logger = logging.getLogger(__name__)
 
@@ -50,27 +50,6 @@ def _public_user(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _require_text(body: dict[str, Any], field: str, max_length: int) -> str:
-    """Read a non-empty, length-limited string, or raise ValidationError.
-
-    ``details`` names the offending field so the form can highlight it.
-    """
-    value = body.get(field)
-
-    if not isinstance(value, str) or not value.strip():
-        raise ValidationError("This field is required.", details={"field": field})
-
-    value = value.strip()
-
-    if len(value) > max_length:
-        raise ValidationError(
-            f"This field must be {max_length} characters or fewer.",
-            details={"field": field},
-        )
-
-    return value
-
-
 def register(request: Request) -> dict[str, Any]:
     """Create an EMPLOYEE account and sign the person in.
 
@@ -82,8 +61,8 @@ def register(request: Request) -> dict[str, Any]:
     """
     body = request.json_body()
 
-    full_name = _require_text(body, "full_name", MAX_NAME_LENGTH)
-    raw_email = _require_text(body, "email", MAX_EMAIL_LENGTH)
+    full_name = require_text(body, "full_name", MAX_NAME_LENGTH)
+    raw_email = require_text(body, "email", MAX_EMAIL_LENGTH)
     password = body.get("password")
 
     if not isinstance(password, str) or len(password) < MIN_PASSWORD_LENGTH:

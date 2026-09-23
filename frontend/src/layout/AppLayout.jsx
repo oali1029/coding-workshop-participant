@@ -23,7 +23,7 @@ import {
   Typography,
 } from '@mui/material'
 import { useMediaQuery } from 'react-responsive'
-import { Outlet, useNavigate } from 'react-router-dom'
+import { Link as RouterLink, Outlet, useNavigate } from 'react-router-dom'
 
 import useAuth from '../auth/useAuth'
 import { roleLabel } from '../roles'
@@ -44,9 +44,27 @@ export default function AppLayout() {
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
       <AppBar position="static">
         <Toolbar>
-          <Typography variant="h6" component="h1" sx={{ flexGrow: 1 }}>
+          <Typography
+            variant="h6"
+            component={RouterLink}
+            to="/"
+            sx={{ color: 'inherit', textDecoration: 'none' }}
+          >
             {isCompact ? 'ACME Incidents' : 'ACME Facility Incident Management'}
           </Typography>
+
+          {/* Primary navigation. Labels are dropped on a phone, where the
+              toolbar has no room for them alongside the user controls. */}
+          <Stack direction="row" spacing={1} sx={{ flexGrow: 1, ml: { xs: 1, sm: 3 } }}>
+            <Button color="inherit" component={RouterLink} to="/incidents" size="small">
+              {isCompact ? 'Incidents' : 'My Incidents'}
+            </Button>
+            {!isCompact && (
+              <Button color="inherit" component={RouterLink} to="/incidents/new" size="small">
+                Report Issue
+              </Button>
+            )}
+          </Stack>
 
           <Stack direction="row" spacing={isCompact ? 0.5 : 1.5} alignItems="center">
             {/* The Slice 0 status page, kept reachable without competing with

@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from . import security
-from .domains import auth, health
+from .domains import auth, health, incidents
 from .errors import MethodNotAllowedError, NotFoundError
 from .http import Request
 
@@ -60,6 +60,12 @@ ROUTES: list[Route] = [
     Route("POST", "/auth/register", auth.register, roles=None),
     Route("POST", "/auth/login", auth.login, roles=None),
     Route("GET", "/auth/me", auth.me, roles=security.ANY_AUTHENTICATED),
+    # Any signed-in user may report and track their own incidents — engineers
+    # and admins are staff who also hit broken taps. Which incidents they can
+    # actually see is decided per row inside the handlers, not here.
+    Route("POST", "/incidents", incidents.create, roles=security.ANY_AUTHENTICATED),
+    Route("GET", "/incidents", incidents.list_mine, roles=security.ANY_AUTHENTICATED),
+    Route("GET", "/incidents/{id}", incidents.get_one, roles=security.ANY_AUTHENTICATED),
 ]
 
 
