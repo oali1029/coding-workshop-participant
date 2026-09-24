@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from . import security
-from .domains import auth, health, incidents, users
+from .domains import auth, facilities, health, incidents, users
 from .errors import MethodNotAllowedError, NotFoundError
 from .http import Request
 
@@ -79,6 +79,29 @@ ROUTES: list[Route] = [
     Route("GET", "/users", users.list_all, roles=security.FACILITY_ADMIN_ONLY),
     Route("GET", "/engineers", users.list_engineers, roles=security.FACILITY_ADMIN_ONLY),
     Route("PATCH", "/users/{id}/role", users.set_role, roles=security.FACILITY_ADMIN_ONLY),
+    # Facilities. Everyone reads them — a reporter needs the location dropdowns —
+    # but only an admin defines the estate.
+    Route("GET", "/buildings", facilities.list_buildings, roles=security.ANY_AUTHENTICATED),
+    Route("POST", "/buildings", facilities.create_building, roles=security.FACILITY_ADMIN_ONLY),
+    Route(
+        "GET",
+        "/buildings/{id}/floors",
+        facilities.list_floors,
+        roles=security.ANY_AUTHENTICATED,
+    ),
+    Route(
+        "PATCH", "/buildings/{id}", facilities.update_building, roles=security.FACILITY_ADMIN_ONLY
+    ),
+    Route(
+        "DELETE", "/buildings/{id}", facilities.delete_building, roles=security.FACILITY_ADMIN_ONLY
+    ),
+    Route("POST", "/floors", facilities.create_floor, roles=security.FACILITY_ADMIN_ONLY),
+    Route("GET", "/floors/{id}/seats", facilities.list_seats, roles=security.ANY_AUTHENTICATED),
+    Route("PATCH", "/floors/{id}", facilities.update_floor, roles=security.FACILITY_ADMIN_ONLY),
+    Route("DELETE", "/floors/{id}", facilities.delete_floor, roles=security.FACILITY_ADMIN_ONLY),
+    Route("POST", "/seats", facilities.create_seat, roles=security.FACILITY_ADMIN_ONLY),
+    Route("PATCH", "/seats/{id}", facilities.update_seat, roles=security.FACILITY_ADMIN_ONLY),
+    Route("DELETE", "/seats/{id}", facilities.delete_seat, roles=security.FACILITY_ADMIN_ONLY),
 ]
 
 

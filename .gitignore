@@ -267,3 +267,12 @@ __pycache__/
 # Dependency cache marker written by bin/start-dev.sh: an md5 of a service's
 # requirements.txt, used to skip reinstalling when nothing has changed.
 backend/*/.pip_installed
+
+# Python packages that bin/start-dev.sh installs *into* the service folder with
+# `pip install --target`, so LocalStack can hot-reload the Lambda. They are
+# build output, not source, and must never be committed.
+backend/*/*.dist-info/
+backend/*/psycopg/
+backend/*/psycopg_binary/
+backend/*/psycopg_binary.libs/
+backend/*/jwt/

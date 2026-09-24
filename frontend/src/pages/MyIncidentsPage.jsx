@@ -26,6 +26,7 @@ import { useMediaQuery } from 'react-responsive'
 import { Link as RouterLink, useNavigate } from 'react-router-dom'
 
 import { listIncidents } from '../api/client'
+import { buildingLabel } from '../facilities'
 import { categoryLabel, formatDateTime, priorityDisplay, statusDisplay } from '../incidents'
 
 export default function MyIncidentsPage() {
@@ -118,6 +119,7 @@ export default function MyIncidentsPage() {
             <TableHead>
               <TableRow>
                 <TableCell>Title</TableCell>
+                <TableCell>Location</TableCell>
                 {!isCompact && <TableCell>Category</TableCell>}
                 <TableCell>Status</TableCell>
                 {!isCompact && <TableCell>Priority</TableCell>}
@@ -137,6 +139,7 @@ export default function MyIncidentsPage() {
                     sx={{ cursor: 'pointer' }}
                   >
                     <TableCell>{incident.title}</TableCell>
+                    <TableCell>{buildingLabel(incident) || '—'}</TableCell>
                     {!isCompact && <TableCell>{categoryLabel(incident.category)}</TableCell>}
                     <TableCell>
                       <Chip size="small" label={statusChip.label} color={statusChip.color} />

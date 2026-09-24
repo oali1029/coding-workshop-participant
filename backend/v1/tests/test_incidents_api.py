@@ -5,30 +5,26 @@ role gate run too — calling a handler directly would skip them, and the
 authorization behaviour is most of what is worth testing here.
 """
 
-from app import db, security
+from conftest import incident_payload
 
-VALID_INCIDENT = {
-    "title": "Leaking tap in the third floor kitchen",
-    "description": "Water pooling under the sink since this morning.",
-    "category": "PLUMBING",
-}
+from app import db, security
 
 
 class TestCreateIncident:
     def test_employee_can_report_an_incident(self, invoke, registered_user):
         status, body = invoke(
-            "POST", "/api/v1/incidents", VALID_INCIDENT, token=registered_user["token"]
+            "POST", "/api/v1/incidents", incident_payload(), token=registered_user["token"]
         )
 
         assert status == 201
         incident = body["incident"]
-        assert incident["title"] == VALID_INCIDENT["title"]
-        assert incident["category"] == "PLUMBING"
+        assert incident["title"] == incident_payload()["title"]
+        assert incident["category"] == incident_payload()["category"]
         assert incident["id"]
 
     def test_new_incidents_always_start_open(self, invoke, registered_user):
         _, body = invoke(
-            "POST", "/api/v1/incidents", VALID_INCIDENT, token=registered_user["token"]
+            "POST", "/api/v1/incidents", incident_payload(), token=registered_user["token"]
         )
 
         assert body["incident"]["status"] == "OPEN"
@@ -38,7 +34,7 @@ class TestCreateIncident:
         _, body = invoke(
             "POST",
             "/api/v1/incidents",
-            {**VALID_INCIDENT, "status": "RESOLVED"},
+            incident_payload(status="RESOLVED"),
             token=registered_user["token"],
         )
 
@@ -54,7 +50,7 @@ class TestCreateIncident:
         _, body = invoke(
             "POST",
             "/api/v1/incidents",
-            {**VALID_INCIDENT, "created_by": 99999},
+            incident_payload(created_by=99999),
             token=registered_user["token"],
         )
 
@@ -62,7 +58,7 @@ class TestCreateIncident:
 
     def test_priority_defaults_to_medium(self, invoke, registered_user):
         _, body = invoke(
-            "POST", "/api/v1/incidents", VALID_INCIDENT, token=registered_user["token"]
+            "POST", "/api/v1/incidents", incident_payload(), token=registered_user["token"]
         )
 
         assert body["incident"]["priority"] == "MEDIUM"
@@ -71,7 +67,7 @@ class TestCreateIncident:
         _, body = invoke(
             "POST",
             "/api/v1/incidents",
-            {**VALID_INCIDENT, "priority": "HIGH"},
+            incident_payload(priority="HIGH"),
             token=registered_user["token"],
         )
 
@@ -81,7 +77,7 @@ class TestCreateIncident:
         _, body = invoke(
             "POST",
             "/api/v1/incidents",
-            {**VALID_INCIDENT, "category": "hvac", "priority": "low"},
+            incident_payload(category="hvac", priority="low"),
             token=registered_user["token"],
         )
 
@@ -90,7 +86,7 @@ class TestCreateIncident:
 
     def test_location_is_optional(self, invoke, registered_user):
         _, body = invoke(
-            "POST", "/api/v1/incidents", VALID_INCIDENT, token=registered_user["token"]
+            "POST", "/api/v1/incidents", incident_payload(), token=registered_user["token"]
         )
 
         assert body["incident"]["location"] is None
@@ -99,7 +95,7 @@ class TestCreateIncident:
         _, body = invoke(
             "POST",
             "/api/v1/incidents",
-            {**VALID_INCIDENT, "location": "   "},
+            incident_payload(location="   "),
             token=registered_user["token"],
         )
 
@@ -109,21 +105,23 @@ class TestCreateIncident:
         _, body = invoke(
             "POST",
             "/api/v1/incidents",
-            {**VALID_INCIDENT, "location": "Building A, 3rd floor"},
+            incident_payload(location="Building A, 3rd floor"),
             token=registered_user["token"],
         )
 
         assert body["incident"]["location"] == "Building A, 3rd floor"
 
     def test_missing_title_is_rejected(self, invoke, registered_user):
-        payload = {k: v for k, v in VALID_INCIDENT.items() if k != "title"}
+        payload = incident_payload()
+        del payload["title"]
         status, body = invoke("POST", "/api/v1/incidents", payload, token=registered_user["token"])
 
         assert status == 400
         assert body["details"]["field"] == "title"
 
     def test_missing_description_is_rejected(self, invoke, registered_user):
-        payload = {k: v for k, v in VALID_INCIDENT.items() if k != "description"}
+        payload = incident_payload()
+        del payload["description"]
         status, body = invoke("POST", "/api/v1/incidents", payload, token=registered_user["token"])
 
         assert status == 400
@@ -133,7 +131,7 @@ class TestCreateIncident:
         status, body = invoke(
             "POST",
             "/api/v1/incidents",
-            {**VALID_INCIDENT, "category": "TELEPORTER"},
+            incident_payload(category="TELEPORTER"),
             token=registered_user["token"],
         )
 
@@ -144,7 +142,7 @@ class TestCreateIncident:
         status, body = invoke(
             "POST",
             "/api/v1/incidents",
-            {**VALID_INCIDENT, "priority": "YESTERDAY"},
+            incident_payload(priority="YESTERDAY"),
             token=registered_user["token"],
         )
 
@@ -152,7 +150,7 @@ class TestCreateIncident:
         assert body["details"]["field"] == "priority"
 
     def test_requires_authentication(self, invoke):
-        status, body = invoke("POST", "/api/v1/incidents", VALID_INCIDENT)
+        status, body = invoke("POST", "/api/v1/incidents", incident_payload())
 
         assert status == 401
         assert body["error"] == "unauthorized"
@@ -164,13 +162,13 @@ class TestListMyIncidents:
         invoke(
             "POST",
             "/api/v1/incidents",
-            {**VALID_INCIDENT, "title": "Mine"},
+            incident_payload(title="Mine"),
             token=registered_user["token"],
         )
         invoke(
             "POST",
             "/api/v1/incidents",
-            {**VALID_INCIDENT, "title": "Theirs"},
+            incident_payload(title="Theirs"),
             token=second_user["token"],
         )
 
@@ -188,13 +186,13 @@ class TestListMyIncidents:
         invoke(
             "POST",
             "/api/v1/incidents",
-            {**VALID_INCIDENT, "title": "Older"},
+            incident_payload(title="Older"),
             token=registered_user["token"],
         )
         invoke(
             "POST",
             "/api/v1/incidents",
-            {**VALID_INCIDENT, "title": "Newer"},
+            incident_payload(title="Newer"),
             token=registered_user["token"],
         )
 
@@ -216,7 +214,7 @@ class TestListMyIncidents:
 class TestIncidentDetail:
     def test_can_open_my_own_incident(self, invoke, registered_user):
         _, made = invoke(
-            "POST", "/api/v1/incidents", VALID_INCIDENT, token=registered_user["token"]
+            "POST", "/api/v1/incidents", incident_payload(), token=registered_user["token"]
         )
         incident_id = made["incident"]["id"]
 
@@ -226,12 +224,12 @@ class TestIncidentDetail:
 
         assert status == 200
         assert body["incident"]["id"] == incident_id
-        assert body["incident"]["description"] == VALID_INCIDENT["description"]
+        assert body["incident"]["description"] == incident_payload()["description"]
 
     def test_another_users_incident_is_not_found(self, invoke, registered_user, second_user):
         """404 rather than 403, so ids cannot be probed to learn what exists."""
         _, made = invoke(
-            "POST", "/api/v1/incidents", VALID_INCIDENT, token=registered_user["token"]
+            "POST", "/api/v1/incidents", incident_payload(), token=registered_user["token"]
         )
         incident_id = made["incident"]["id"]
 
@@ -249,7 +247,7 @@ class TestIncidentDetail:
         FACILITY_ADMIN is exempt.
         """
         _, made = invoke(
-            "POST", "/api/v1/incidents", VALID_INCIDENT, token=registered_user["token"]
+            "POST", "/api/v1/incidents", incident_payload(), token=registered_user["token"]
         )
 
         status, body = invoke(
@@ -269,7 +267,7 @@ class TestIncidentDetail:
         as a separate list in a later slice.
         """
         _, made = invoke(
-            "POST", "/api/v1/incidents", VALID_INCIDENT, token=registered_user["token"]
+            "POST", "/api/v1/incidents", incident_payload(), token=registered_user["token"]
         )
 
         status, _ = invoke(
@@ -290,7 +288,7 @@ class TestIncidentDetail:
 
     def test_requires_authentication(self, invoke, registered_user):
         _, made = invoke(
-            "POST", "/api/v1/incidents", VALID_INCIDENT, token=registered_user["token"]
+            "POST", "/api/v1/incidents", incident_payload(), token=registered_user["token"]
         )
 
         status, _ = invoke("GET", f"/api/v1/incidents/{made['incident']['id']}")

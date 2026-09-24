@@ -85,6 +85,11 @@ export default function AppLayout() {
                 Users
               </Button>
             )}
+            {isAdmin && !isCompact && (
+              <Button color="inherit" component={RouterLink} to="/admin/facilities" size="small">
+                Facilities
+              </Button>
+            )}
           </Stack>
 
           <Stack direction="row" spacing={isCompact ? 0.5 : 1.5} alignItems="center">

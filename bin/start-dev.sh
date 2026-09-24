@@ -339,7 +339,20 @@ for req in "$PROJECT_ROOT"/backend/*/requirements.txt; do
         continue
     fi
     echo -e "  Installing pip requirements for $(basename "$svc_dir")..."
-    pip install --quiet --target="$svc_dir" -r "$req" 2>/dev/null || true
+    # `python3 -m pip`, not a bare `pip`: whichever pip is first on PATH may
+    # belong to a different Python version than the Lambda runtime, and a
+    # compiled wheel such as psycopg_binary built for the wrong interpreter
+    # fails to import inside the function.
+    #
+    # Errors are no longer discarded, and the hash marker is written only after
+    # a successful install. Previously a failed install still wrote it, so every
+    # later startup skipped the install and the Lambda returned 502 with
+    # "No module named 'psycopg'".
+    if ! python3 -m pip install --quiet --target="$svc_dir" -r "$req"; then
+        echo -e "  ✗ Failed to install pip requirements for $(basename "$svc_dir")"
+        echo -e "    Fix the error above and re-run; starting now would deploy a broken Lambda."
+        exit 1
+    fi
     echo "$REQS_HASH" > "$HASH_FILE"
 done
 
@@ -487,12 +500,21 @@ echo -e "  Generating frontend environment configuration..."
     echo -e "  ⚠ Could not generate .env.local"
 }
 
-# Restart proxy so it picks up the newly generated .env.local
+# Restart proxy so it picks up the newly generated .env.local.
+#
+# These were an if/elif, which failed whenever the recorded pid was stale: the
+# first branch matched, the kill did nothing, and the port check never ran — so
+# a proxy started outside this script kept port 3001 and the new one died with
+# EADDRINUSE. Both steps now always run.
 if [ -f /tmp/proxy-server.pid ]; then
-    kill "$(cat /tmp/proxy-server.pid)" || echo "WARN: no process found"
+    kill "$(cat /tmp/proxy-server.pid)" 2>/dev/null || true
     rm -f /tmp/proxy-server.pid
-elif lsof -iTCP:3001 -sTCP:LISTEN > /dev/null 2>&1; then
-    lsof -ti:3001 | xargs kill 2>/dev/null
+fi
+
+if lsof -iTCP:3001 -sTCP:LISTEN > /dev/null 2>&1; then
+    lsof -ti:3001 | xargs -r kill 2>/dev/null || true
+    # Give the socket a moment to be released before the new proxy binds.
+    sleep 1
 fi
 
 echo -e "  Starting CORS proxy server..."

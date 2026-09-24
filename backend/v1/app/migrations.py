@@ -204,6 +204,65 @@ _MIGRATIONS: list[Migration] = [
             ON incidents (assignee_id, created_at DESC);
         """,
     ),
+    Migration(
+        version=5,
+        name="facilities",
+        # The estate — Building > Floor > Seat — and where each incident happened.
+        #
+        # Deleting a building CASCADEs to its floors and seats, but only SETs NULL
+        # on incidents: CASCADE there would delete history, RESTRICT would make
+        # buildings undeletable. location_snapshot keeps the incident readable
+        # after the references are gone.
+        #
+        # The incident columns are nullable even though building and floor are
+        # required when reporting — older incidents predate them, and SET NULL
+        # needs nullability. The create handler enforces the requirement.
+        #
+        # building_id sits on the incident directly, not only via floor_id, so
+        # grouping incidents by building needs no joins.
+        sql="""
+        CREATE TABLE IF NOT EXISTS buildings (
+            id         BIGSERIAL PRIMARY KEY,
+            name       TEXT NOT NULL UNIQUE,
+            address    TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+
+        -- Names are unique per parent, not globally: every building has a "Floor 3".
+        CREATE TABLE IF NOT EXISTS floors (
+            id          BIGSERIAL PRIMARY KEY,
+            building_id BIGINT NOT NULL REFERENCES buildings (id) ON DELETE CASCADE,
+            name        TEXT NOT NULL,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CONSTRAINT floors_unique_per_building UNIQUE (building_id, name)
+        );
+
+        CREATE TABLE IF NOT EXISTS seats (
+            id         BIGSERIAL PRIMARY KEY,
+            floor_id   BIGINT NOT NULL REFERENCES floors (id) ON DELETE CASCADE,
+            code       TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            CONSTRAINT seats_unique_per_floor UNIQUE (floor_id, code)
+        );
+
+        CREATE INDEX IF NOT EXISTS floors_building_idx ON floors (building_id, name);
+        CREATE INDEX IF NOT EXISTS seats_floor_idx ON seats (floor_id, code);
+
+        ALTER TABLE incidents
+            ADD COLUMN IF NOT EXISTS building_id BIGINT
+                REFERENCES buildings (id) ON DELETE SET NULL,
+            ADD COLUMN IF NOT EXISTS floor_id BIGINT
+                REFERENCES floors (id) ON DELETE SET NULL,
+            ADD COLUMN IF NOT EXISTS seat_id BIGINT
+                REFERENCES seats (id) ON DELETE SET NULL,
+            ADD COLUMN IF NOT EXISTS location_snapshot TEXT;
+
+        CREATE INDEX IF NOT EXISTS incidents_building_idx ON incidents (building_id);
+        """,
+    ),
 ]
 
 

@@ -34,6 +34,7 @@ import { Link as RouterLink, useParams } from 'react-router-dom'
 import { getIncident, listEngineers, updateIncident } from '../api/client'
 import useAuth from '../auth/useAuth'
 import WorkflowStepper from '../components/WorkflowStepper'
+import { isLocationArchived, locationPath } from '../facilities'
 import {
   ADMIN_SETTABLE,
   ENGINEER_SETTABLE,
@@ -244,8 +245,20 @@ export default function IncidentDetailPage() {
                 )}
               </DetailRow>
               <DetailRow label="Location">
-                {incident.location || <em>Not specified</em>}
+                {locationPath(incident) || <em>Not specified</em>}
+                {/* The structured references are gone but the snapshot taken at
+                    report time still describes where the problem was. */}
+                {isLocationArchived(incident) && (
+                  <Typography variant="caption" color="text.secondary" display="block">
+                    This location has since been removed from the facility list.
+                  </Typography>
+                )}
               </DetailRow>
+              {/* Only when there is a structured location above it — otherwise
+                  locationPath already fell back to this same free text. */}
+              {incident.location && (incident.building_name || incident.location_snapshot) && (
+                <DetailRow label="Details">{incident.location}</DetailRow>
+              )}
               <DetailRow label="Reported">{formatDateTime(incident.created_at)}</DetailRow>
               <DetailRow label="Last updated">{formatDateTime(incident.updated_at)}</DetailRow>
             </Box>

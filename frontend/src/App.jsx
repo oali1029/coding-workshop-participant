@@ -17,6 +17,7 @@ import AdminRoute from './auth/AdminRoute'
 import AuthProvider from './auth/AuthProvider'
 import ProtectedRoute from './auth/ProtectedRoute'
 import AppLayout from './layout/AppLayout'
+import AdminFacilitiesPage from './pages/AdminFacilitiesPage'
 import AdminIncidentsPage from './pages/AdminIncidentsPage'
 import AdminUsersPage from './pages/AdminUsersPage'
 import AssignedIncidentsPage from './pages/AssignedIncidentsPage'
@@ -61,6 +62,7 @@ function App() {
                     pages keep the same chrome as everything else. */}
                 <Route element={<AdminRoute />}>
                   <Route path="/admin/incidents" element={<AdminIncidentsPage />} />
+                  <Route path="/admin/facilities" element={<AdminFacilitiesPage />} />
                   <Route path="/admin/users" element={<AdminUsersPage />} />
                 </Route>
               </Route>

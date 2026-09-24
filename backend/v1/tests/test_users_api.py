@@ -5,6 +5,8 @@ changes are rejected. Role management is the only way an ENGINEER can come into
 existence, so its guards are worth testing thoroughly.
 """
 
+from conftest import incident_payload
+
 from app import db, security
 
 
@@ -194,7 +196,7 @@ class TestEngineersKeepEmployeeCapabilities:
         status, body = invoke(
             "POST",
             "/api/v1/incidents",
-            {"title": "My own broken chair", "description": "Wobbly.", "category": "FURNITURE"},
+            incident_payload(title="My own broken chair", category="FURNITURE"),
             token=engineer_user["token"],
         )
 
@@ -205,7 +207,7 @@ class TestEngineersKeepEmployeeCapabilities:
         invoke(
             "POST",
             "/api/v1/incidents",
-            {"title": "My own broken chair", "description": "Wobbly.", "category": "FURNITURE"},
+            incident_payload(title="My own broken chair", category="FURNITURE"),
             token=engineer_user["token"],
         )
 
@@ -221,7 +223,7 @@ class TestEngineersKeepEmployeeCapabilities:
         invoke(
             "POST",
             "/api/v1/incidents",
-            {"title": "Reported while an engineer", "description": "x", "category": "OTHER"},
+            incident_payload(title="Reported while an engineer", category="OTHER"),
             token=engineer_user["token"],
         )
 

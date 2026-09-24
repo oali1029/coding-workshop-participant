@@ -5,11 +5,7 @@ only place where one user sees another user's incidents — so who is refused
 matters as much as what is returned.
 """
 
-INCIDENT = {
-    "title": "Broken air conditioning",
-    "description": "Third floor is too warm.",
-    "category": "HVAC",
-}
+from conftest import incident_payload
 
 
 class TestAdminIncidentList:
@@ -19,13 +15,13 @@ class TestAdminIncidentList:
         invoke(
             "POST",
             "/api/v1/incidents",
-            {**INCIDENT, "title": "From the first user"},
+            incident_payload(title="From the first user"),
             token=registered_user["token"],
         )
         invoke(
             "POST",
             "/api/v1/incidents",
-            {**INCIDENT, "title": "From the second user"},
+            incident_payload(title="From the second user"),
             token=second_user["token"],
         )
 
@@ -38,7 +34,7 @@ class TestAdminIncidentList:
 
     def test_includes_who_reported_each_incident(self, invoke, registered_user, admin_token):
         """Oversight is meaningless without knowing whose problem it is."""
-        invoke("POST", "/api/v1/incidents", INCIDENT, token=registered_user["token"])
+        invoke("POST", "/api/v1/incidents", incident_payload(), token=registered_user["token"])
 
         _, body = invoke("GET", "/api/v1/admin/incidents", token=admin_token)
 
@@ -54,13 +50,13 @@ class TestAdminIncidentList:
         invoke(
             "POST",
             "/api/v1/incidents",
-            {**INCIDENT, "title": "Older"},
+            incident_payload(title="Older"),
             token=registered_user["token"],
         )
         invoke(
             "POST",
             "/api/v1/incidents",
-            {**INCIDENT, "title": "Newer"},
+            incident_payload(title="Newer"),
             token=registered_user["token"],
         )
 
@@ -72,7 +68,7 @@ class TestAdminIncidentList:
         self, invoke, registered_user, admin_token
     ):
         """The reporter join reads the users table, so this is worth asserting."""
-        invoke("POST", "/api/v1/incidents", INCIDENT, token=registered_user["token"])
+        invoke("POST", "/api/v1/incidents", incident_payload(), token=registered_user["token"])
 
         _, body = invoke("GET", "/api/v1/admin/incidents", token=admin_token)
 
@@ -109,7 +105,7 @@ class TestMyIncidentsStaysCreatorScoped:
         invoke(
             "POST",
             "/api/v1/incidents",
-            {**INCIDENT, "title": "Reported by an employee"},
+            incident_payload(title="Reported by an employee"),
             token=registered_user["token"],
         )
 

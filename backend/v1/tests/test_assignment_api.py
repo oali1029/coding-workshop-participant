@@ -5,18 +5,14 @@ and whether the three lists stay distinct. Those rules are the product, and a
 mistake in them is invisible until someone sees work that is not theirs.
 """
 
-from app import db
+from conftest import incident_payload
 
-INCIDENT = {
-    "title": "Broken air conditioning",
-    "description": "Third floor is too warm.",
-    "category": "HVAC",
-}
+from app import db
 
 
 def _report(invoke, token, title="Broken air conditioning"):
     """Report an incident and return its id."""
-    _, body = invoke("POST", "/api/v1/incidents", {**INCIDENT, "title": title}, token=token)
+    _, body = invoke("POST", "/api/v1/incidents", incident_payload(title=title), token=token)
     return body["incident"]["id"]
 
 

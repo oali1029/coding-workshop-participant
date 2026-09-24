@@ -139,6 +139,11 @@ export function patch(path, body, options) {
   return request(path, { ...options, method: 'PATCH', body })
 }
 
+/** Remove a record. Named `del` because `delete` is a reserved word. */
+export function del(path, options) {
+  return request(path, { ...options, method: 'DELETE' })
+}
+
 // Named helpers per endpoint so URLs live in one file.
 
 /** Create an account. The backend always assigns the EMPLOYEE role. */
@@ -167,8 +172,28 @@ export function getHealth() {
  * from the verified token, and sending them would achieve nothing — see
  * backend/v1/app/domains/incidents.py.
  */
-export function createIncident({ title, description, category, priority, location }) {
-  return post('/incidents', { title, description, category, priority, location })
+export function createIncident({
+  title,
+  description,
+  category,
+  priority,
+  location,
+  buildingId,
+  floorId,
+  seatId,
+}) {
+  return post('/incidents', {
+    title,
+    description,
+    category,
+    priority,
+    location,
+    // Building and floor are required by the API; the seat is optional and is
+    // sent as null when no specific seat applies.
+    building_id: buildingId,
+    floor_id: floorId,
+    seat_id: seatId,
+  })
 }
 
 /** List the incidents the signed-in user reported, newest first. */
@@ -204,6 +229,56 @@ export function updateIncident(id, changes) {
 /** Users who can be assigned work: active, role ENGINEER. */
 export function listEngineers() {
   return get('/engineers')
+}
+
+// --- Facilities. Reads are open to everyone; writes are admin-only. ---
+
+export function listBuildings() {
+  return get('/buildings')
+}
+
+export function listFloors(buildingId) {
+  return get(`/buildings/${buildingId}/floors`)
+}
+
+export function listSeats(floorId) {
+  return get(`/floors/${floorId}/seats`)
+}
+
+export function createBuilding({ name, address }) {
+  return post('/buildings', { name, address })
+}
+
+export function updateBuilding(id, changes) {
+  return patch(`/buildings/${id}`, changes)
+}
+
+export function deleteBuilding(id) {
+  return del(`/buildings/${id}`)
+}
+
+export function createFloor({ buildingId, name }) {
+  return post('/floors', { building_id: buildingId, name })
+}
+
+export function updateFloor(id, name) {
+  return patch(`/floors/${id}`, { name })
+}
+
+export function deleteFloor(id) {
+  return del(`/floors/${id}`)
+}
+
+export function createSeat({ floorId, code }) {
+  return post('/seats', { floor_id: floorId, code })
+}
+
+export function updateSeat(id, code) {
+  return patch(`/seats/${id}`, { code })
+}
+
+export function deleteSeat(id) {
+  return del(`/seats/${id}`)
 }
 
 /** Every incident in the organisation, newest first, with reporter details. */

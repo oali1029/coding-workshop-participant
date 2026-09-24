@@ -92,17 +92,27 @@ const server = http.createServer((req, res) => {
   delete headers['sec-fetch-dest'];
 
   // Keep only essential headers
+  const forwarded = {
+    'accept': headers.accept || 'application/json',
+    'content-type': headers['content-type'] || 'application/json',
+    'user-agent': headers['user-agent'] || 'proxy-server',
+    'host': target.host
+  };
+
+  // Forward the bearer token. Without this every authenticated request fails
+  // locally with 401 while working fine against deployed AWS, because this
+  // whitelist silently dropped it. Only added when present, so unauthenticated
+  // calls such as login and health are unchanged.
+  if (headers.authorization) {
+    forwarded.authorization = headers.authorization;
+  }
+
   const options = {
     hostname: target.hostname,
     port: target.port,
     path: target.path,
     method: req.method,
-    headers: {
-      'accept': headers.accept || 'application/json',
-      'content-type': headers['content-type'] || 'application/json',
-      'user-agent': headers['user-agent'] || 'proxy-server',
-      'host': target.host
-    }
+    headers: forwarded
   };
 
   const proxyReq = protocol.request(options, (proxyRes) => {

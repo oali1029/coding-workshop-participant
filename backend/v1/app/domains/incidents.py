@@ -72,13 +72,20 @@ _INCIDENT_SELECT = """
     SELECT
         i.id, i.title, i.description, i.category, i.priority, i.status, i.location,
         i.created_by, i.assignee_id, i.created_at, i.updated_at,
+        i.building_id, i.floor_id, i.seat_id, i.location_snapshot,
         reporter.full_name AS reporter_name,
         reporter.email     AS reporter_email,
         assignee.full_name AS assignee_name,
-        assignee.email     AS assignee_email
+        assignee.email     AS assignee_email,
+        building.name      AS building_name,
+        floor.name         AS floor_name,
+        seat.code          AS seat_code
     FROM incidents i
     JOIN users reporter ON reporter.id = i.created_by
     LEFT JOIN users assignee ON assignee.id = i.assignee_id
+    LEFT JOIN buildings building ON building.id = i.building_id
+    LEFT JOIN floors floor ON floor.id = i.floor_id
+    LEFT JOIN seats seat ON seat.id = i.seat_id
 """
 
 
@@ -129,6 +136,74 @@ def _optional_text(body: dict[str, Any], field: str, max_length: int) -> str | N
     return value
 
 
+def _resolve_location(body: dict[str, Any]) -> dict[str, Any]:
+    """Validate the reported location and return the ids plus a readable snapshot.
+
+    Building and floor are required; a seat is not, because elevators, bathrooms, and sinks do not have seats.
+
+    One joined query resolves all three at once and proves they belong together.
+    Validating them separately would let a crafted request file an incident at
+    "Building A / Floor 9 of Building B".
+
+    The snapshot ("Building A > Floor 3 > A-312") is stored on the incident so
+    the location still reads correctly if the facility is later deleted.
+    """
+    building_id = _required_id(body, "building_id")
+    floor_id = _required_id(body, "floor_id")
+
+    seat_id = body.get("seat_id")
+    if seat_id is not None:
+        try:
+            seat_id = int(seat_id)
+        except (TypeError, ValueError):
+            raise ValidationError("Invalid seat.", details={"field": "seat_id"})
+
+    row = db.query_one(
+        """
+        SELECT b.name AS building_name, f.name AS floor_name, s.code AS seat_code
+        FROM buildings b
+        JOIN floors f ON f.id = %s AND f.building_id = b.id
+        LEFT JOIN seats s ON s.id = %s AND s.floor_id = f.id
+        WHERE b.id = %s
+        """,
+        (floor_id, seat_id, building_id),
+    )
+
+    if row is None:
+        # Covers a missing building, a missing floor, and a floor belonging to a
+        # different building. One message for all three so the endpoint cannot be
+        # used to probe which ids exist.
+        raise ValidationError(
+            "Select a valid building and a floor within it.",
+            details={"field": "floor_id"},
+        )
+
+    # The LEFT JOIN yields a row even when the seat is wrong, so check separately.
+    if seat_id is not None and row["seat_code"] is None:
+        raise ValidationError(
+            "The selected seat is not on that floor.", details={"field": "seat_id"}
+        )
+
+    parts = [row["building_name"], row["floor_name"]]
+    if row["seat_code"]:
+        parts.append(row["seat_code"])
+
+    return {
+        "building_id": building_id,
+        "floor_id": floor_id,
+        "seat_id": seat_id,
+        "snapshot": " > ".join(parts),
+    }
+
+
+def _required_id(body: dict[str, Any], field: str) -> int:
+    """Read a required foreign key from the request body."""
+    try:
+        return int(body[field])
+    except (KeyError, TypeError, ValueError):
+        raise ValidationError("This field is required.", details={"field": field})
+
+
 def _incident_id(request: Request) -> int:
     """Read the {id} path parameter as a number.
 
@@ -163,13 +238,31 @@ def create(request: Request) -> dict[str, Any]:
     # Note what is absent: nothing reads body["status"], body["created_by"] or
     # body["assignee_id"]. Status is a constant, the reporter comes from the
     # token the router verified, and assignment is an admin action afterwards.
+    # Where it happened. Building and floor are required; the seat is not.
+    place = _resolve_location(body)
+
     row = db.query_one(
         """
-        INSERT INTO incidents (title, description, category, priority, status, location, created_by)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO incidents (
+            title, description, category, priority, status, location, created_by,
+            building_id, floor_id, seat_id, location_snapshot
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
         """,
-        (title, description, category, priority, INITIAL_STATUS, location, request.user["id"]),
+        (
+            title,
+            description,
+            category,
+            priority,
+            INITIAL_STATUS,
+            location,
+            request.user["id"],
+            place["building_id"],
+            place["floor_id"],
+            place["seat_id"],
+            place["snapshot"],
+        ),
     )
 
     logger.info("User %s reported incident %s", request.user["id"], row["id"])

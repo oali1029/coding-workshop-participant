@@ -21,6 +21,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 
 import { createIncident } from '../api/client'
+import LocationPicker from '../components/LocationPicker'
 import { CATEGORIES, DEFAULT_PRIORITY, PRIORITIES } from '../incidents'
 
 // Mirror the limits in backend/v1/app/domains/incidents.py so the user is told
@@ -39,6 +40,10 @@ export default function ReportIncidentPage() {
     priority: DEFAULT_PRIORITY,
     location: '',
   })
+
+  // Building and floor are required; the seat is not. Held separately from the
+  // text fields because LocationPicker owns all three together.
+  const [place, setPlace] = useState({ buildingId: '', floorId: '', seatId: '' })
   const [submitting, setSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const [fieldErrors, setFieldErrors] = useState({})
@@ -74,6 +79,14 @@ export default function ReportIncidentPage() {
       errors.location = `Must be ${MAX_LOCATION_LENGTH} characters or fewer.`
     }
 
+    if (!place.buildingId) {
+      errors.building_id = 'Please choose a building.'
+    }
+
+    if (!place.floorId) {
+      errors.floor_id = 'Please choose a floor.'
+    }
+
     return errors
   }
 
@@ -97,6 +110,11 @@ export default function ReportIncidentPage() {
         category: form.category,
         priority: form.priority,
         location: form.location.trim(),
+        buildingId: place.buildingId,
+        floorId: place.floorId,
+        // An empty selection means "no specific seat", which the API expects
+        // as an absent value rather than an empty string.
+        seatId: place.seatId || null,
       })
 
       // Go straight to the new incident so the user sees it was recorded, and
@@ -190,14 +208,24 @@ export default function ReportIncidentPage() {
               ))}
             </TextField>
 
+            <LocationPicker
+              value={place}
+              onChange={setPlace}
+              disabled={submitting}
+              errors={fieldErrors}
+            />
+
             <TextField
-              label="Location (optional)"
+              label="Additional location details (optional)"
               value={form.location}
               onChange={handleChange('location')}
               fullWidth
               disabled={submitting}
               error={Boolean(fieldErrors.location)}
-              helperText={fieldErrors.location || 'e.g. "Building A, 3rd floor kitchen"'}
+              helperText={
+                fieldErrors.location ||
+                'Where exactly, e.g. "men\'s restroom" or "east elevator"'
+              }
             />
 
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>

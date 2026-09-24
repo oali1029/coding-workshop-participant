@@ -37,12 +37,30 @@ os.environ.setdefault("POSTGRES_NAME", "postgres")
 # The tests assert against this variable rather than a literal, so the suite
 # keeps passing whatever value an environment happens to supply.
 BOOTSTRAP_ADMIN_TEST_PASSWORD = "pytest-only-not-a-real-password"
+
+# Captured BEFORE the override below, because the suite shares one database with
+# the running application. The tests reseed admin@acme.inc with the throwaway
+# password above, and ensure_bootstrap_admin creates but never resets — so
+# without restoring it afterwards the developer's own admin login would silently
+# stop working until they deleted the row by hand.
+DEVELOPER_BOOTSTRAP_PASSWORD = os.environ.get("BOOTSTRAP_ADMIN_PASSWORD") or os.environ.get(
+    "TF_VAR_aws_bootstrap_admin_password"
+)
+
 os.environ["BOOTSTRAP_ADMIN_PASSWORD"] = BOOTSTRAP_ADMIN_TEST_PASSWORD
 
 from app import db, migrations, security  # noqa: E402  (must follow the env setup above)
 
 # Every address created by a test contains this, so cleanup can find them.
 TEST_EMAIL_MARKER = "+pytest-"
+
+# Buildings created by this suite carry this prefix so cleanup leaves real ones
+# alone.
+TEST_BUILDING_PREFIX = "pytest-building-"
+
+# Ids of the building, floor and seat every incident test reports against.
+# Populated by the session fixture below, then read by incident_payload().
+TEST_FACILITY: dict[str, int] = {}
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -58,10 +76,86 @@ def prepared_database():
     migrations.ensure_bootstrap_admin()
 
     _delete_test_users()
+    _create_test_facility()
 
     yield  # the tests run at this point
 
     _delete_test_users()
+    _delete_test_facilities()
+    _restore_developer_admin()
+
+
+def _restore_developer_admin() -> None:
+    """Undo the suite's overwrite of admin@acme.inc.
+
+    The account is removed either way, so a stale test password can never
+    shadow the real one. When the developer has supplied a bootstrap password it
+    is recreated immediately; otherwise the next application startup creates it.
+    """
+    db.execute(
+        "DELETE FROM incidents WHERE created_by = (SELECT id FROM users WHERE email = %s)",
+        (security.SEED_ADMIN_EMAIL,),
+    )
+    db.execute("DELETE FROM users WHERE email = %s", (security.SEED_ADMIN_EMAIL,))
+
+    if DEVELOPER_BOOTSTRAP_PASSWORD:
+        os.environ["BOOTSTRAP_ADMIN_PASSWORD"] = DEVELOPER_BOOTSTRAP_PASSWORD
+        migrations.ensure_bootstrap_admin()
+
+
+def _create_test_facility() -> None:
+    """Create the building, floor and seat that incident tests report against.
+
+    Building and floor are required when reporting, so every incident test needs
+    somewhere to point at. One shared facility keeps those tests about the
+    behaviour they are actually checking.
+    """
+    building = db.query_one(
+        "INSERT INTO buildings (name) VALUES (%s) RETURNING id",
+        (f"{TEST_BUILDING_PREFIX}main",),
+    )
+    floor = db.query_one(
+        "INSERT INTO floors (building_id, name) VALUES (%s, %s) RETURNING id",
+        (building["id"], "Floor 1"),
+    )
+    seat = db.query_one(
+        "INSERT INTO seats (floor_id, code) VALUES (%s, %s) RETURNING id",
+        (floor["id"], "T-001"),
+    )
+
+    TEST_FACILITY.update(
+        building_id=building["id"], floor_id=floor["id"], seat_id=seat["id"]
+    )
+
+
+def _delete_test_facilities() -> None:
+    """Remove facilities this suite created. Floors and seats cascade."""
+    db.execute(
+        "DELETE FROM buildings WHERE name LIKE %s", (f"{TEST_BUILDING_PREFIX}%",)
+    )
+
+
+@pytest.fixture
+def facility():
+    """Ids of the shared test building, floor and seat."""
+    return dict(TEST_FACILITY)
+
+
+def incident_payload(**overrides):
+    """Build a valid incident body, with the shared test facility filled in.
+
+    A function rather than a module constant because TEST_FACILITY is only
+    populated once the session fixture has run.
+    """
+    payload = {
+        "title": "Broken air conditioning",
+        "description": "Third floor is too warm.",
+        "category": "HVAC",
+        "building_id": TEST_FACILITY["building_id"],
+        "floor_id": TEST_FACILITY["floor_id"],
+    }
+    payload.update(overrides)
+    return payload
 
 
 def _delete_test_users() -> None:
