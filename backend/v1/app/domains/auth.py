@@ -47,6 +47,9 @@ def _public_user(row: dict[str, Any]) -> dict[str, Any]:
         "email": row["email"],
         "full_name": row["full_name"],
         "role": row["role"],
+        # Only meaningful for an engineer, but returned for everyone so the
+        # frontend never has to special-case a missing field.
+        "is_available": row["is_available"],
     }
 
 
@@ -100,7 +103,7 @@ def register(request: Request) -> dict[str, Any]:
         INSERT INTO users (email, password_hash, full_name, role)
         VALUES (%s, %s, %s, %s)
         ON CONFLICT (email) DO NOTHING
-        RETURNING id, email, full_name, role, is_active, created_at
+        RETURNING id, email, full_name, role, is_active, is_available, created_at
         """,
         (email, password_hash, full_name, security.ROLE_EMPLOYEE),
     )
@@ -136,7 +139,7 @@ def login(request: Request) -> dict[str, Any]:
 
     user = db.query_one(
         """
-        SELECT id, email, password_hash, full_name, role, is_active, created_at
+        SELECT id, email, password_hash, full_name, role, is_active, is_available, created_at
         FROM users
         WHERE email = %s
         """,

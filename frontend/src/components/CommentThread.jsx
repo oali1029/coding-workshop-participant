@@ -63,12 +63,12 @@ function Comment({ comment, canModify, onSave, onDelete, busy }) {
   }
 
   return (
-    <Stack direction="row" spacing={1.5} alignItems="flex-start">
+    <Stack direction="row" spacing={1.5} sx={{ alignItems: 'flex-start' }}>
       <Avatar sx={{ width: 32, height: 32, fontSize: 13 }}>
         {initials(comment.author_name)}
       </Avatar>
       <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+        <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
           <Typography variant="subtitle2">{comment.author_name}</Typography>
           <Chip size="small" variant="outlined" label={roleLabel(comment.author_role)} />
           <Typography variant="caption" color="text.secondary">
@@ -252,7 +252,7 @@ export default function CommentThread({ incidentId, isClosed }) {
       </Typography>
 
       {status === 'loading' && (
-        <Stack alignItems="center" sx={{ py: 3 }}>
+        <Stack sx={{ alignItems: 'center', py: 3 }}>
           <CircularProgress size={24} />
         </Stack>
       )}
@@ -313,7 +313,7 @@ export default function CommentThread({ incidentId, isClosed }) {
                 }
               />
 
-              <Stack direction="row" justifyContent="flex-end">
+              <Stack direction="row" sx={{ justifyContent: 'flex-end' }}>
                 <Button
                   type="submit"
                   variant="contained"

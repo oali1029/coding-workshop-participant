@@ -219,7 +219,8 @@ def authenticate_request(request: Any) -> dict[str, Any]:
     # let a deactivated leaver or a demoted user keep their old access until it
     # expired. One primary-key lookup is a cheap price for that.
     user = db.query_one(
-        "SELECT id, email, full_name, role, is_active, created_at FROM users WHERE id = %s",
+        "SELECT id, email, full_name, role, is_active, is_available, created_at "
+        "FROM users WHERE id = %s",
         (user_id,),
     )
 

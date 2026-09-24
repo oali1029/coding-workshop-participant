@@ -92,7 +92,7 @@ export default function StatusPage() {
 
       <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
         {status === 'loading' && (
-          <Stack alignItems="center" spacing={2} sx={{ py: 4 }}>
+          <Stack spacing={2} sx={{ alignItems: 'center', py: 4 }}>
             <CircularProgress />
             <Typography variant="body2" color="text.secondary">
               Contacting the backend service...
@@ -118,7 +118,7 @@ export default function StatusPage() {
 
         {status === 'success' && health && (
           <Stack spacing={0}>
-            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 2 }}>
               <Chip label="Operational" color="success" size="small" />
               <Typography variant="body2" color="text.secondary">
                 All checks passed

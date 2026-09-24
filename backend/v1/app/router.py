@@ -135,11 +135,14 @@ ROUTES: list[Route] = [
     Route("GET", "/users", users.list_all, roles=security.FACILITY_ADMIN_ONLY),
     Route("GET", "/engineers", users.list_engineers, roles=security.FACILITY_ADMIN_ONLY),
     Route("PATCH", "/users/{id}/role", users.set_role, roles=security.FACILITY_ADMIN_ONLY),
+    # Broader than the role endpoint above: an engineer may set their own
+    # availability, an admin anyone's. "Only yourself" is not something a role
+    # set can express, so the handler checks it.
     Route(
         "PATCH",
         "/users/{id}/availability",
         users.set_availability,
-        roles=security.FACILITY_ADMIN_ONLY,
+        roles=security.ENGINEER_OR_ADMIN,
     ),
     # Facilities. Everyone reads them — a reporter needs the location dropdowns —
     # but only an admin defines the estate.

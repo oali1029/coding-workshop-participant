@@ -246,15 +246,77 @@ class TestEngineerAvailability:
     def test_employee_cannot_manage_availability(
         self, invoke, registered_user, engineer_user
     ):
+        """Refused by the route table: employees hold no work, so the setting
+        means nothing for them and is not theirs to change for anyone else."""
         assert self._availability(
             invoke, registered_user["token"], engineer_user["user"]["id"], False
         )[0] == 403
 
-    def test_engineer_cannot_manage_their_own_availability(self, invoke, engineer_user):
-        """Availability is a staffing decision, not self-service."""
+    def test_employee_cannot_set_their_own(self, invoke, registered_user):
         assert self._availability(
-            invoke, engineer_user["token"], engineer_user["user"]["id"], False
+            invoke, registered_user["token"], registered_user["user"]["id"], False
         )[0] == 403
+
+    def test_engineer_can_manage_their_own_availability(self, invoke, engineer_user):
+        """They know first when they are heading out, so they can say so."""
+        status, body = self._availability(
+            invoke, engineer_user["token"], engineer_user["user"]["id"], False
+        )
+
+        assert status == 200
+        assert body["user"]["is_available"] is False
+
+    def test_engineer_can_make_themselves_available_again(self, invoke, engineer_user):
+        self._availability(invoke, engineer_user["token"], engineer_user["user"]["id"], False)
+
+        _, body = self._availability(
+            invoke, engineer_user["token"], engineer_user["user"]["id"], True
+        )
+
+        assert body["user"]["is_available"] is True
+
+    def test_engineer_cannot_change_a_colleagues_availability(
+        self, invoke, engineer_user, second_engineer
+    ):
+        """Self-service, not peer management."""
+        status, _ = self._availability(
+            invoke, engineer_user["token"], second_engineer["user"]["id"], False
+        )
+
+        assert status == 403
+        assert db.query_one(
+            "SELECT is_available FROM users WHERE id = %s",
+            (second_engineer["user"]["id"],),
+        )["is_available"] is True
+
+    def test_admin_can_still_set_anyone(self, invoke, engineer_user, admin_token):
+        status, body = self._availability(
+            invoke, admin_token, engineer_user["user"]["id"], False
+        )
+
+        assert status == 200
+        assert body["user"]["is_available"] is False
+
+    def test_own_availability_is_reported_by_auth_me(self, invoke, engineer_user):
+        """The frontend reads its toggle state from here."""
+        self._availability(invoke, engineer_user["token"], engineer_user["user"]["id"], False)
+
+        _, body = invoke("GET", "/api/v1/auth/me", token=engineer_user["token"])
+
+        assert body["user"]["is_available"] is False
+
+    def test_unavailable_engineer_still_sees_their_queue(
+        self, invoke, registered_user, engineer_user, admin_token
+    ):
+        """Marking yourself out stops new work arriving; it does not sign you out."""
+        iid = _report(invoke, registered_user["token"])
+        _assign(invoke, admin_token, iid, engineer_user["user"]["id"])
+
+        self._availability(invoke, engineer_user["token"], engineer_user["user"]["id"], False)
+
+        status, body = invoke("GET", "/api/v1/incidents/assigned", token=engineer_user["token"])
+        assert status == 200
+        assert iid in [row["id"] for row in body["incidents"]]
 
     def test_rejected_for_a_non_engineer(self, invoke, registered_user, admin_token):
         status, _ = self._availability(

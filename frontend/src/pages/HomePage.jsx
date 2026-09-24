@@ -40,7 +40,7 @@ export default function HomePage() {
       </Box>
 
       <Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
-        <Stack direction="row" spacing={1.5} alignItems="flex-start">
+        <Stack direction="row" spacing={1.5} sx={{ alignItems: 'flex-start' }}>
           <CheckCircleIcon color="success" />
           <Box>
             <Typography variant="subtitle1" gutterBottom>

@@ -110,7 +110,7 @@ export default function AppLayout() {
             )}
           </Stack>
 
-          <Stack direction="row" spacing={isCompact ? 0.5 : 1.5} alignItems="center">
+          <Stack direction="row" spacing={isCompact ? 0.5 : 1.5} sx={{ alignItems: 'center' }}>
             {/* The Slice 0 status page, kept reachable without competing with
                 the product for space. */}
             <Tooltip title="System status">

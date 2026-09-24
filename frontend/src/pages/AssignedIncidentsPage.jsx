@@ -13,9 +13,11 @@ import {
   Box,
   Chip,
   CircularProgress,
+  FormControlLabel,
   LinearProgress,
   Paper,
   Stack,
+  Switch,
   Table,
   TableBody,
   TableCell,
@@ -28,7 +30,13 @@ import {
 import { useMediaQuery } from 'react-responsive'
 import { useNavigate } from 'react-router-dom'
 
-import { getAssignedSummary, listAssignedIncidents, listBuildings } from '../api/client'
+import {
+  getAssignedSummary,
+  listAssignedIncidents,
+  listBuildings,
+  setEngineerAvailability,
+} from '../api/client'
+import useAuth from '../auth/useAuth'
 import IncidentFilters from '../components/IncidentFilters'
 import SummaryCards from '../components/SummaryCards'
 import { buildingLabel } from '../facilities'
@@ -46,6 +54,7 @@ const QUEUE_STATUSES = ['OPEN', 'IN_PROGRESS', 'BLOCKED', 'RESOLVED']
 
 export default function AssignedIncidentsPage() {
   const theme = useTheme()
+  const { user, refreshUser } = useAuth()
   const [status, setStatus] = useState('loading')
   const [incidents, setIncidents] = useState([])
   const [errorMessage, setErrorMessage] = useState('')
@@ -56,9 +65,31 @@ export default function AssignedIncidentsPage() {
   const [filters, setFilters] = useState(NO_FILTERS)
   const [buildings, setBuildings] = useState([])
   const [loadedQuery, setLoadedQuery] = useState(null)
+  const [savingAvailability, setSavingAvailability] = useState(false)
+  const [availabilityError, setAvailabilityError] = useState('')
 
   const appliedSearch = useDebouncedSearch(search)
   const isCompact = useMediaQuery({ maxWidth: 800 })
+
+  /**
+   * Tell the team you are or are not taking new work.
+   *
+   * Unavailable only stops new assignments — this queue and everything in it
+   * stays exactly as it is, which is why the page does not reload afterwards.
+   */
+  async function handleAvailabilityChange(isAvailable) {
+    setSavingAvailability(true)
+    setAvailabilityError('')
+
+    try {
+      const { user: updated } = await setEngineerAvailability(user.id, isAvailable)
+      refreshUser(updated)
+    } catch (error) {
+      setAvailabilityError(error.message)
+    } finally {
+      setSavingAvailability(false)
+    }
+  }
 
   useEffect(() => {
     let ignore = false
@@ -138,14 +169,44 @@ export default function AssignedIncidentsPage() {
 
   return (
     <Stack spacing={3}>
-      <Box>
-        <Typography variant="h5" component="h2" gutterBottom>
-          Assigned to me
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          Your work queue, newest first.
-        </Typography>
-      </Box>
+      <Stack
+        direction={{ xs: 'column', sm: 'row' }}
+        spacing={2}
+        sx={{ justifyContent: 'space-between', alignItems: { sm: 'flex-start' } }}
+      >
+        <Box>
+          <Typography variant="h5" component="h2" gutterBottom>
+            Assigned to me
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Your work queue, newest first.
+          </Typography>
+        </Box>
+
+        <Paper variant="outlined" sx={{ px: 2, py: 1, flexShrink: 0 }}>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={user.is_available}
+                disabled={savingAvailability}
+                onChange={(event) => handleAvailabilityChange(event.target.checked)}
+              />
+            }
+            label={
+              <Box>
+                <Typography variant="body2">
+                  {user.is_available ? 'Available for new work' : 'Not taking new work'}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Your current tickets stay with you either way
+                </Typography>
+              </Box>
+            }
+          />
+        </Paper>
+      </Stack>
+
+      {availabilityError && <Alert severity="error">{availabilityError}</Alert>}
 
       {summary && (
         <>
@@ -155,7 +216,7 @@ export default function AssignedIncidentsPage() {
             <Typography variant="subtitle2" gutterBottom>
               By priority
             </Typography>
-            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
               {Object.entries(summary.by_priority).map(([value, count]) => (
                 <Chip
                   key={value}
@@ -186,7 +247,7 @@ export default function AssignedIncidentsPage() {
       />
 
       {status === 'loading' && (
-        <Stack alignItems="center" sx={{ py: 6 }}>
+        <Stack sx={{ alignItems: 'center', py: 6 }}>
           <CircularProgress />
         </Stack>
       )}
@@ -232,7 +293,7 @@ export default function AssignedIncidentsPage() {
                     sx={{ cursor: 'pointer' }}
                   >
                     <TableCell>
-                      <Stack direction="row" spacing={0.5} alignItems="center">
+                      <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
                         {incident.escalation_requested && (
                           <Tooltip title="Escalation requested">
                             <PriorityHighIcon color="error" fontSize="small" />

@@ -30,7 +30,14 @@ import {
 import { getAnalytics } from '../api/client'
 import BreakdownSection from '../components/BreakdownSection'
 import SummaryCards from '../components/SummaryCards'
-import { CATEGORIES, PRIORITIES, STATUS_ORDER, priorityDisplay, statusDisplay } from '../incidents'
+import {
+  CATEGORIES,
+  PRIORITIES,
+  STATUS_ORDER,
+  categoryLabel,
+  priorityDisplay,
+  statusDisplay,
+} from '../incidents'
 
 /**
  * Colours for category and building slices, which carry no meaning of their own
@@ -73,6 +80,12 @@ function formatDuration(seconds) {
     return `${minutes}m`
   }
   return `${total}s`
+}
+
+/** Whole pounds-style grouping, e.g. $1,200. Fractions of a currency unit are
+ *  noise on an illustrative estimate, so they are not shown. */
+function formatMoney(amount) {
+  return `$${Math.round(amount || 0).toLocaleString()}`
 }
 
 /** One lifecycle average, with the sample it was taken from. */
@@ -202,7 +215,7 @@ export default function AnalyticsPage() {
       </Box>
 
       {status === 'loading' && (
-        <Stack alignItems="center" sx={{ py: 6 }}>
+        <Stack sx={{ alignItems: 'center', py: 6 }}>
           <CircularProgress />
         </Stack>
       )}
@@ -226,7 +239,7 @@ export default function AnalyticsPage() {
             title="Response times"
             description="Averaged in the database across every incident that reached each milestone. Incidents that have not got there yet are excluded rather than counted as zero."
           />
-          <Stack direction="row" spacing={2} useFlexGap flexWrap="wrap">
+          <Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: 'wrap' }}>
             <TimingCard
               label="Average time to acknowledgement"
               seconds={summary.lifecycle.seconds_to_acknowledge}
@@ -328,6 +341,8 @@ export default function AnalyticsPage() {
           />
 
           <EngineerTable engineers={summary.engineers} />
+
+          <OperationalInsights insights={summary.operational} />
         </>
       )}
     </Stack>
@@ -396,5 +411,156 @@ function EngineerTable({ engineers }) {
         </Table>
       )}
     </Paper>
+  )
+}
+
+/**
+ * Recurring problems and what leaving them unresolved is costing, roughly.
+ *
+ * The distinction this section exists to make: three people reporting one
+ * broken lift are three incidents everywhere else on this page, and one problem
+ * here. The estimate charges for it once, at the highest priority anyone gave
+ * it, so duplicate reports cannot inflate the figure.
+ *
+ * The disclaimer is not decoration. These are illustrative rates for ranking
+ * problems by how much attention they deserve, not an accounting figure, and
+ * the wording has to keep saying so wherever the number appears.
+ */
+function OperationalInsights({ insights }) {
+  const { window_days: windowDays, hourly_rates: rates } = insights
+
+  const cards = [
+    {
+      key: 'estimated',
+      label: 'Estimated Operational Impact',
+      value: formatMoney(insights.estimated_impact),
+    },
+    {
+      key: 'active',
+      label: 'Active Operational Impact',
+      value: formatMoney(insights.active_impact),
+    },
+    {
+      key: 'recurring',
+      label: 'Recurring Problems',
+      value: insights.recurring_count,
+    },
+  ]
+
+  return (
+    <>
+      <SectionHeading
+        title="Operational Insights"
+        description={`Reports of the same problem in the same place, over the last ${windowDays} days.`}
+      />
+
+      <Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: 'wrap' }}>
+        {cards.map((card) => (
+          <Paper
+            key={card.key}
+            variant="outlined"
+            sx={{ p: 2, flex: '1 1 200px', minWidth: 170, textAlign: 'center' }}
+          >
+            <Typography variant="h5" component="p" sx={{ fontWeight: 600 }}>
+              {card.value}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {card.label}
+            </Typography>
+          </Paper>
+        ))}
+      </Stack>
+
+      <Alert severity="info" icon={false}>
+        Illustrative estimate based on incident priority and time unresolved.
+        Duplicate reports of the same recurring problem are counted once.
+        Rates: {Object.entries(rates)
+          .map(([priority, rate]) => `${priorityDisplay(priority).label} $${rate}/hour`)
+          .join(' · ')}.
+      </Alert>
+
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', md: '7fr 5fr' },
+          gap: 3,
+          alignItems: 'start',
+        }}
+      >
+        <Paper variant="outlined" sx={{ p: { xs: 2.5, sm: 3 } }}>
+          <Typography variant="subtitle1" gutterBottom>
+            Recurring Problems
+          </Typography>
+
+          {insights.recurring_problems.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              No recurring problems detected in the last {windowDays} days.
+            </Typography>
+          ) : (
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Location</TableCell>
+                  <TableCell>Category</TableCell>
+                  <TableCell align="right">Reports</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {insights.recurring_problems.map((problem) => (
+                  <TableRow key={`${problem.location}-${problem.category}`}>
+                    <TableCell>
+                      {problem.location}
+                      {problem.is_active && (
+                        <Chip size="small" color="warning" label="Active" sx={{ ml: 1 }} />
+                      )}
+                    </TableCell>
+                    <TableCell>{categoryLabel(problem.category)}</TableCell>
+                    <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {problem.reports}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </Paper>
+
+        <Paper variant="outlined" sx={{ p: { xs: 2.5, sm: 3 } }}>
+          <Typography variant="subtitle1" gutterBottom>
+            Impact by Priority
+          </Typography>
+
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Priority</TableCell>
+                <TableCell align="right">Estimated Impact</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {PRIORITIES.map((priority) => (
+                <TableRow key={priority.value}>
+                  <TableCell>{priority.label}</TableCell>
+                  <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                    {formatMoney(insights.impact_by_priority[priority.value])}
+                  </TableCell>
+                </TableRow>
+              ))}
+              {/* Reconciles with the headline card above — the quickest way to
+                  see the per-priority split is complete. */}
+              <TableRow>
+                <TableCell sx={{ fontWeight: 600, borderBottom: 'none' }}>Total</TableCell>
+                <TableCell
+                  align="right"
+                  sx={{ fontWeight: 600, borderBottom: 'none', fontVariantNumeric: 'tabular-nums' }}
+                >
+                  {formatMoney(insights.estimated_impact)}
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </Paper>
+      </Box>
+    </>
   )
 }

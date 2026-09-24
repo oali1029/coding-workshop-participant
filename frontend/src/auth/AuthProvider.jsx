@@ -95,10 +95,22 @@ export default function AuthProvider({ children }) {
     setStatus('anonymous')
   }, [])
 
+  /**
+   * Replace the cached user with a fresher copy from the server.
+   *
+   * Used where a page changes something about the signed-in person themselves —
+   * an engineer setting their own availability — so the header and any other
+   * consumer see it without a reload. It only ever accepts a user the API
+   * returned; it is not a way to invent a role.
+   */
+  const refreshUser = useCallback((updated) => {
+    setUser(updated)
+  }, [])
+
   // Memoised so consumers do not re-render on every parent render.
   const value = useMemo(
-    () => ({ user, status, login, register, logout }),
-    [user, status, login, register, logout],
+    () => ({ user, status, login, register, logout, refreshUser }),
+    [user, status, login, register, logout, refreshUser],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

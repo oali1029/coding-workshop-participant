@@ -43,7 +43,7 @@ export default function DonutChart({ slices, centerLabel = 'Total' }) {
   })
 
   return (
-    <Stack alignItems="center" spacing={1}>
+    <Stack spacing={1} sx={{ alignItems: 'center' }}>
       <Box
         component="svg"
         viewBox={`0 0 ${SIZE} ${SIZE}`}

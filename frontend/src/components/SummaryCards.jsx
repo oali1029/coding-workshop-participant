@@ -11,7 +11,7 @@ import { Paper, Stack, Typography } from '@mui/material'
 /** @param cards - [{ key, label, count, accent }] */
 export default function SummaryCards({ cards }) {
   return (
-    <Stack direction="row" spacing={2} useFlexGap flexWrap="wrap">
+    <Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: 'wrap' }}>
       {cards.map((card) => (
         <Paper
           key={card.key}

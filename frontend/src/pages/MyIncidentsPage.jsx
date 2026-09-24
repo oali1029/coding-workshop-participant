@@ -138,8 +138,7 @@ export default function MyIncidentsPage() {
       <Stack
         direction={{ xs: 'column', sm: 'row' }}
         spacing={2}
-        justifyContent="space-between"
-        alignItems={{ sm: 'center' }}
+        sx={{ justifyContent: 'space-between', alignItems: { sm: 'center' } }}
       >
         <Box>
           <Typography variant="h5" component="h2" gutterBottom>
@@ -167,7 +166,7 @@ export default function MyIncidentsPage() {
             <Typography variant="subtitle2" gutterBottom>
               By priority
             </Typography>
-            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
               {Object.entries(summary.by_priority).map(([value, count]) => (
                 <Chip
                   key={value}
@@ -198,7 +197,7 @@ export default function MyIncidentsPage() {
       />
 
       {status === 'loading' && (
-        <Stack alignItems="center" sx={{ py: 6 }}>
+        <Stack sx={{ alignItems: 'center', py: 6 }}>
           <CircularProgress />
         </Stack>
       )}
@@ -243,7 +242,7 @@ export default function MyIncidentsPage() {
                     sx={{ cursor: 'pointer' }}
                   >
                     <TableCell>
-                      <Stack direction="row" spacing={0.5} alignItems="center">
+                      <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
                         {incident.escalation_requested && (
                           <Tooltip title="Escalation requested">
                             <PriorityHighIcon color="error" fontSize="small" />

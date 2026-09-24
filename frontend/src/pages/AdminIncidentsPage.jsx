@@ -170,7 +170,7 @@ export default function AdminIncidentsPage() {
       />
 
       {status === 'loading' && (
-        <Stack alignItems="center" sx={{ py: 6 }}>
+        <Stack sx={{ alignItems: 'center', py: 6 }}>
           <CircularProgress />
         </Stack>
       )}
@@ -223,7 +223,7 @@ export default function AdminIncidentsPage() {
                       sx={{ cursor: 'pointer' }}
                     >
                       <TableCell>
-                        <Stack direction="row" spacing={0.5} alignItems="center">
+                        <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
                           {/* The admin is the one who acts on escalations, so
                               they are flagged in the list rather than only on
                               the detail page. */}

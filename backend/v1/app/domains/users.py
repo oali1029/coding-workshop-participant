@@ -97,13 +97,19 @@ def list_engineers(request: Request) -> dict[str, Any]:
 
 
 def set_availability(request: Request) -> dict[str, Any]:
-    """Mark an engineer available or unavailable. Facility Admin only.
+    """Mark an engineer available or unavailable for new work.
 
     The lightest possible answer to "which engineers are available?" — a single
-    flag an admin keeps current, not a scheduling system. Unavailable means
-    "give them no new work"; tickets they already hold stay with them, because
-    reassigning someone's queue the moment they go on leave would lose the
-    context they have on each one.
+    flag, not a scheduling system. Unavailable means "give them no new work";
+    tickets they already hold stay with them, because reassigning someone's
+    queue the moment they go on leave would lose the context they have on each
+    one.
+
+    An engineer may set their own, since they know first when they are heading
+    out. An admin may set anyone's, for the days somebody forgets. What an
+    engineer may not do is change a colleague's — that is the one case this
+    handler has to check, because the route alone cannot express "only
+    yourself".
 
     Only engineers have availability. Setting it on an employee would record a
     fact about somebody who cannot hold work in the first place.
@@ -111,7 +117,8 @@ def set_availability(request: Request) -> dict[str, Any]:
     Raises:
         NotFoundError: the id is not a number, or no such user.
         ValidationError: is_available missing or not a boolean.
-        ForbiddenError: the target is not an engineer.
+        ForbiddenError: the target is not an engineer, or an engineer is
+            trying to set somebody else's.
     """
     user_id = _path_user_id(request)
     body = request.json_body()
@@ -121,6 +128,11 @@ def set_availability(request: Request) -> dict[str, Any]:
         raise ValidationError(
             "This field must be true or false.", details={"field": "is_available"}
         )
+
+    is_admin = request.user["role"] == security.ROLE_FACILITY_ADMIN
+
+    if not is_admin and user_id != request.user["id"]:
+        raise ForbiddenError("You can only change your own availability.")
 
     target = db.query_one("SELECT id, role FROM users WHERE id = %s", (user_id,))
 
@@ -141,7 +153,7 @@ def set_availability(request: Request) -> dict[str, Any]:
     )
 
     logger.info(
-        "Admin %s set engineer %s availability to %s", request.user["id"], user_id, value
+        "User %s set engineer %s availability to %s", request.user["id"], user_id, value
     )
 
     return ok({"user": row})

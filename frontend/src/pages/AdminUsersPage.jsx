@@ -147,7 +147,7 @@ export default function AdminUsersPage() {
       {errorMessage && <Alert severity="error">{errorMessage}</Alert>}
 
       {status === 'loading' && (
-        <Stack alignItems="center" sx={{ py: 6 }}>
+        <Stack sx={{ alignItems: 'center', py: 6 }}>
           <CircularProgress />
         </Stack>
       )}

@@ -39,6 +39,25 @@ NO_SEAT_LABEL = "Shared / No Specific Seat"
 #: Bucket for incidents nobody is working on yet.
 UNASSIGNED_LABEL = "Unassigned"
 
+#: How far back the recurring-problem and impact analysis looks.
+OPERATIONAL_WINDOW_DAYS = 30
+
+#: Reports of one underlying problem before it counts as recurring.
+RECURRING_THRESHOLD = 3
+
+#: Illustrative hourly cost of a problem going unresolved, by priority.
+#:
+#: NOT an accounting figure — see the disclaimer the UI carries. It exists to
+#: rank problems by how much attention they deserve, not to be put in a ledger.
+#: Keys must match PRIORITIES exactly; a test asserts they do, so adding a
+#: priority without a rate here fails loudly rather than silently costing £0.
+PRIORITY_HOURLY_RATES = {"LOW": 10, "MEDIUM": 25, "HIGH": 50}
+
+# Ranks the priorities so a group of duplicate reports can take the highest one.
+# Kept as SQL because the grouping happens in the database.
+_PRIORITY_RANK_SQL = "CASE i.priority WHEN 'HIGH' THEN 3 WHEN 'MEDIUM' THEN 2 ELSE 1 END"
+_RANK_TO_PRIORITY = {3: "HIGH", 2: "MEDIUM", 1: "LOW"}
+
 # "Active" means an engineer may still have to do something, so anything that is
 # not CLOSED counts — including RESOLVED, which is awaiting admin review and can
 # be sent back. Used for engineer workload.
@@ -244,8 +263,145 @@ def summary(request: Request) -> dict[str, Any]:
             "engineers": _engineer_workload(),
             "lifecycle": _lifecycle_averages(),
             "escalations_open": escalated,
+            # Reports collapsed into underlying problems. Deliberately separate
+            # from every count above, which stays per incident.
+            "operational": _operational_insights(),
         }
     )
+
+
+def _underlying_problems() -> list[dict[str, Any]]:
+    """Collapse recent incident reports into the underlying problems they describe.
+
+    THE DISTINCTION THIS EXISTS FOR: three people reporting one broken lift are
+    three incidents and one problem. The incident counts elsewhere in this module
+    stay at three — that is how many tickets there are — but a problem that costs
+    the business time costs it once, so impact is measured per problem.
+
+    Grouping key: category plus the structured location (building, floor and
+    seat ids). location_snapshot is deliberately not parsed; it is display text
+    describing where something was, not a key, and two people can describe one
+    place differently.
+
+    An incident with no structured location — its facility was deleted, or it
+    predates Slice 5 — becomes a group of its own. Without a location there is
+    no evidence two such reports are the same problem, and merging them on
+    category alone would silently discount unrelated work. That is what the
+    ``CASE WHEN i.building_id IS NULL THEN i.id END`` term does: a real location
+    contributes a constant NULL and the rows collapse, a missing one contributes
+    the incident's own id and the row stands alone.
+
+    Timing, per problem:
+        started_at  earliest report — the problem began when someone first hit it
+        ended_at    latest resolved/closed among its reports; the problem is only
+                    over once the last ticket for it is
+        is_active   any report still open, in progress or blocked
+    """
+    return db.query_all(
+        f"""
+        SELECT
+            i.category                       AS category,
+            building.name                    AS building_name,
+            floor.name                       AS floor_name,
+            seat.code                        AS seat_code,
+            COUNT(*)                         AS report_count,
+            MIN(i.created_at)                AS started_at,
+            MAX(COALESCE(i.resolved_at, i.closed_at, i.updated_at)) AS ended_at,
+            bool_or(i.status NOT IN ('RESOLVED', 'CLOSED')) AS is_active,
+            MAX({_PRIORITY_RANK_SQL})        AS priority_rank,
+            -- Seconds the problem has been, or was, unresolved. now() for one
+            -- still running; GREATEST guards against a clock skew producing a
+            -- negative duration.
+            GREATEST(
+                0,
+                EXTRACT(EPOCH FROM (
+                    CASE
+                        WHEN bool_or(i.status NOT IN ('RESOLVED', 'CLOSED')) THEN now()
+                        ELSE COALESCE(
+                            MAX(COALESCE(i.resolved_at, i.closed_at, i.updated_at)),
+                            now()
+                        )
+                    END - MIN(i.created_at)
+                ))
+            ) AS unresolved_seconds
+        FROM incidents i
+        LEFT JOIN buildings building ON building.id = i.building_id
+        LEFT JOIN floors floor ON floor.id = i.floor_id
+        LEFT JOIN seats seat ON seat.id = i.seat_id
+        WHERE i.created_at >= now() - make_interval(days => %s)
+        GROUP BY
+            i.category,
+            i.building_id, i.floor_id, i.seat_id,
+            CASE WHEN i.building_id IS NULL THEN i.id END,
+            building.name, floor.name, seat.code
+        ORDER BY COUNT(*) DESC, MIN(i.created_at)
+        """,
+        (OPERATIONAL_WINDOW_DAYS,),
+    )
+
+
+def _problem_location(row: dict[str, Any]) -> str:
+    """The most specific structured location available, as a readable path."""
+    parts = [row["building_name"], row["floor_name"], row["seat_code"]]
+    return " > ".join(part for part in parts if part) or ARCHIVED_LOCATION_LABEL
+
+
+def _operational_insights() -> dict[str, Any]:
+    """Recurring problems and an illustrative cost of leaving them unresolved.
+
+    Each underlying problem is charged once, at the rate of the highest priority
+    among its reports — so duplicate reports cannot multiply the estimate, and a
+    problem somebody marked urgent is not understated because others filed it as
+    routine.
+
+    The rates are applied here rather than in SQL so they stay a visible product
+    constant, and in the browser not at all: the figures arrive already totalled.
+    """
+    problems = _underlying_problems()
+
+    estimated = 0.0
+    active = 0.0
+    by_priority = {priority: 0.0 for priority in PRIORITIES}
+    recurring: list[dict[str, Any]] = []
+
+    for row in problems:
+        priority = _RANK_TO_PRIORITY[row["priority_rank"]]
+        hours = float(row["unresolved_seconds"]) / 3600.0
+        impact = round(hours * PRIORITY_HOURLY_RATES[priority], 2)
+
+        estimated += impact
+        by_priority[priority] += impact
+        if row["is_active"]:
+            active += impact
+
+        if row["report_count"] >= RECURRING_THRESHOLD:
+            recurring.append(
+                {
+                    "location": _problem_location(row),
+                    "category": row["category"],
+                    "reports": row["report_count"],
+                    "priority": priority,
+                    "is_active": row["is_active"],
+                    "estimated_impact": impact,
+                }
+            )
+
+    return {
+        "window_days": OPERATIONAL_WINDOW_DAYS,
+        "recurring_threshold": RECURRING_THRESHOLD,
+        "hourly_rates": PRIORITY_HOURLY_RATES,
+        "problem_count": len(problems),
+        "recurring_count": len(recurring),
+        "recurring_problems": recurring,
+        # Both totals are sums of the same already-rounded per-problem amounts,
+        # which is what makes the priority table reconcile with the headline
+        # exactly rather than drifting by a penny per problem.
+        "estimated_impact": round(estimated, 2),
+        "active_impact": round(active, 2),
+        "impact_by_priority": {
+            priority: round(amount, 2) for priority, amount in by_priority.items()
+        },
+    }
 
 
 def _seat_breakdown() -> list[dict[str, Any]]:

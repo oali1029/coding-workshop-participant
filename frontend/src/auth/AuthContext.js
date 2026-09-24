@@ -6,8 +6,8 @@
  * refresh only works cleanly when a file exports components or plain values,
  * not both.
  *
- * Provided shape: { user, status, login, register, logout }, where status is
- * 'loading' | 'authenticated' | 'anonymous'.
+ * Provided shape: { user, status, login, register, logout, refreshUser },
+ * where status is 'loading' | 'authenticated' | 'anonymous'.
  */
 
 import { createContext } from 'react'

@@ -61,8 +61,18 @@ export default function IncidentFilters({
         />
 
         {/* Wraps rather than scrolling, so every control stays reachable on a
-            phone without a horizontal swipe. */}
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} flexWrap="wrap" useFlexGap>
+            phone without a horizontal swipe.
+
+            flexWrap belongs in sx, not in a prop: Stack takes only its own
+            props plus sx, so `flexWrap="wrap"` would land on the DOM node and
+            never become CSS — leaving the row unable to wrap and the last
+            dropdown overflowing the panel. */}
+        <Stack
+          direction={{ xs: 'column', sm: 'row' }}
+          spacing={2}
+          useFlexGap
+          sx={{ flexWrap: 'wrap' }}
+        >
           <TextField
             select
             size="small"

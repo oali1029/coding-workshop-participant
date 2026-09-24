@@ -295,7 +295,7 @@ export default function IncidentDetailPage() {
       </Box>
 
       {status === 'loading' && (
-        <Stack alignItems="center" sx={{ py: 6 }}>
+        <Stack sx={{ alignItems: 'center', py: 6 }}>
           <CircularProgress />
         </Stack>
       )}
@@ -309,7 +309,7 @@ export default function IncidentDetailPage() {
               <Typography variant="h5" component="h2" gutterBottom>
                 {incident.title}
               </Typography>
-              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
                 <Chip
                   size="small"
                   label={statusDisplay(incident.status).label}
@@ -618,7 +618,7 @@ export default function IncidentDetailPage() {
                   <Stack
                     direction={{ xs: 'column', sm: 'row' }}
                     spacing={2}
-                    alignItems={{ sm: 'center' }}
+                    sx={{ alignItems: { sm: 'center' } }}
                   >
                     <Button
                       variant="outlined"
