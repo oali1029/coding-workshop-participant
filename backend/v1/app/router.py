@@ -68,6 +68,16 @@ ROUTES: list[Route] = [
     # Must precede "/incidents/{id}": routes match in list order, and the
     # placeholder would otherwise capture "assigned" as an incident id.
     Route("GET", "/incidents/assigned", incidents.list_assigned, roles=security.ENGINEER_ONLY),
+    # Personal dashboards. Same ordering rule as above: literal paths before the
+    # "{id}" placeholder, or "summary" would be read as an incident id. Each is
+    # scoped in SQL to the caller, so neither can report anyone else's work.
+    Route("GET", "/incidents/summary", analytics.my_summary, roles=security.ANY_AUTHENTICATED),
+    Route(
+        "GET",
+        "/incidents/assigned/summary",
+        analytics.assigned_summary,
+        roles=security.ENGINEER_ONLY,
+    ),
     Route("GET", "/incidents/{id}", incidents.get_one, roles=security.ANY_AUTHENTICATED),
     # Engineers work their own assigned incidents, admins work any; the handler
     # decides which, and which statuses each may set.
@@ -89,6 +99,34 @@ ROUTES: list[Route] = [
         comments.create,
         roles=security.ANY_AUTHENTICATED,
     ),
+    # Editing and deleting a note is gated on authorship inside the handler, not
+    # on role — an admin has no more claim on someone's words than anyone else.
+    Route(
+        "PATCH",
+        "/incidents/{id}/comments/{comment_id}",
+        comments.update,
+        roles=security.ANY_AUTHENTICATED,
+    ),
+    Route(
+        "DELETE",
+        "/incidents/{id}/comments/{comment_id}",
+        comments.delete,
+        roles=security.ANY_AUTHENTICATED,
+    ),
+    # Escalation: the reporter asks, an admin answers. Two endpoints rather than
+    # a writable flag, so neither party can perform the other's half.
+    Route(
+        "POST",
+        "/incidents/{id}/escalation",
+        incidents.request_escalation,
+        roles=security.ANY_AUTHENTICATED,
+    ),
+    Route(
+        "DELETE",
+        "/incidents/{id}/escalation",
+        incidents.acknowledge_escalation,
+        roles=security.FACILITY_ADMIN_ONLY,
+    ),
     # Facility Admin oversight and team management. Separate paths rather than
     # role-aware versions of the routes above, so the access rule is visible
     # here instead of buried in a handler.
@@ -97,6 +135,12 @@ ROUTES: list[Route] = [
     Route("GET", "/users", users.list_all, roles=security.FACILITY_ADMIN_ONLY),
     Route("GET", "/engineers", users.list_engineers, roles=security.FACILITY_ADMIN_ONLY),
     Route("PATCH", "/users/{id}/role", users.set_role, roles=security.FACILITY_ADMIN_ONLY),
+    Route(
+        "PATCH",
+        "/users/{id}/availability",
+        users.set_availability,
+        roles=security.FACILITY_ADMIN_ONLY,
+    ),
     # Facilities. Everyone reads them — a reporter needs the location dropdowns —
     # but only an admin defines the estate.
     Route("GET", "/buildings", facilities.list_buildings, roles=security.ANY_AUTHENTICATED),

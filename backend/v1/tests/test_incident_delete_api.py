@@ -91,7 +91,9 @@ class TestDeleteSucceeds:
             iid = _report(invoke, registered_user["token"])
             _assign(invoke, admin_token, iid, engineer_user["user"]["id"])
             if value != "OPEN":
-                invoke("PATCH", f"/api/v1/incidents/{iid}", {"status": value}, token=admin_token)
+                invoke("PATCH", f"/api/v1/incidents/{iid}",
+                       {"status": value, "blocked_reason": "Waiting on a part."},
+                       token=admin_token)
 
             assert _delete(invoke, iid, admin_token)[0] == 200, f"failed from {value}"
             assert not _exists("incidents", iid)
@@ -221,7 +223,7 @@ class TestAnalyticsAfterDeletion:
 
     def _building_count(self, summary, name):
         for row in summary["by_building"]:
-            if row["building"] == name:
+            if row["label"] == name:
                 return row["count"]
         return 0
 

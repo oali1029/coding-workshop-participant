@@ -43,6 +43,10 @@ const STATUS_DISPLAY = {
   CLOSED: { label: 'Closed', short: 'Closed', color: 'success' },
 }
 
+// Workflow order, used by the dashboards and analytics so their cards and rows
+// read as a pipeline rather than in whatever order the API serialised them.
+export const STATUS_ORDER = ['OPEN', 'IN_PROGRESS', 'BLOCKED', 'RESOLVED', 'CLOSED']
+
 // The happy path through the workflow, for the stepper on the detail page.
 // BLOCKED is deliberately absent: it is a state work can fall into at any point,
 // not a step along the way, so it is rendered as an error on the current step.

@@ -116,6 +116,28 @@ def cursor() -> Iterator[Any]:
         raise
 
 
+@contextmanager
+def transaction() -> Iterator[Any]:
+    """Yield a cursor whose statements all commit together, or not at all.
+
+    The pooled connection is in autocommit mode, so each statement is normally
+    its own transaction. Use this where two writes must not be observable
+    apart — the block commits on exit and rolls back if anything raises.
+
+    The connection is discarded on failure for the same reason as in
+    :func:`cursor`: a connection whose state we are unsure of should not go
+    back into the pool.
+    """
+    conn = get_connection()
+    try:
+        with conn.transaction():
+            with conn.cursor() as cur:
+                yield cur
+    except Exception:
+        reset_connection()
+        raise
+
+
 def query_all(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
     """Run a query and return all rows.
 

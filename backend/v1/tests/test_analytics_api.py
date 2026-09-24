@@ -11,7 +11,7 @@ import uuid
 from conftest import TEST_BUILDING_PREFIX, incident_payload
 
 from app import db
-from app.domains.analytics import ARCHIVED_BUILDING_LABEL
+from app.domains.analytics import ARCHIVED_LOCATION_LABEL
 from app.domains.incidents import CATEGORIES, STATUSES
 
 
@@ -24,7 +24,7 @@ def _summary(invoke, admin_token):
 def _building_count(summary, name):
     """The count for one building, or 0 when it has no incidents."""
     for row in summary["by_building"]:
-        if row["building"] == name:
+        if row["label"] == name:
             return row["count"]
     return 0
 
@@ -194,6 +194,6 @@ class TestAnalyticsByBuilding:
 
         assert after["total"] == before["total"]
         assert _building_count(after, doomed["name"]) == 0
-        assert _building_count(after, ARCHIVED_BUILDING_LABEL) == (
-            _building_count(before, ARCHIVED_BUILDING_LABEL) + 1
+        assert _building_count(after, ARCHIVED_LOCATION_LABEL) == (
+            _building_count(before, ARCHIVED_LOCATION_LABEL) + 1
         )

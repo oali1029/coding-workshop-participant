@@ -10,6 +10,8 @@
  */
 
 import { useEffect, useState } from 'react'
+import DeleteIcon from '@mui/icons-material/Delete'
+import EditIcon from '@mui/icons-material/Edit'
 import SendIcon from '@mui/icons-material/Send'
 import {
   Alert,
@@ -18,13 +20,16 @@ import {
   Button,
   Chip,
   CircularProgress,
+  IconButton,
   Paper,
   Stack,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material'
 
-import { createComment, listComments } from '../api/client'
+import { createComment, deleteComment, listComments, updateComment } from '../api/client'
+import useAuth from '../auth/useAuth'
 import { formatDateTime } from '../incidents'
 import { roleLabel } from '../roles'
 
@@ -42,7 +47,21 @@ function initials(name) {
     .join('')
 }
 
-function Comment({ comment }) {
+function Comment({ comment, canModify, onSave, onDelete, busy }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(comment.body)
+
+  async function submit() {
+    const body = draft.trim()
+    if (!body) {
+      return
+    }
+    const saved = await onSave(comment.id, body)
+    if (saved) {
+      setEditing(false)
+    }
+  }
+
   return (
     <Stack direction="row" spacing={1.5} alignItems="flex-start">
       <Avatar sx={{ width: 32, height: 32, fontSize: 13 }}>
@@ -55,17 +74,81 @@ function Comment({ comment }) {
           <Typography variant="caption" color="text.secondary">
             {formatDateTime(comment.created_at)}
           </Typography>
+          {/* edited_at is set only by an edit, so its presence is the marker —
+              a corrected note is visibly corrected rather than silently changed. */}
+          {comment.edited_at && (
+            <Tooltip title={`Edited ${formatDateTime(comment.edited_at)}`}>
+              <Typography variant="caption" color="text.secondary">
+                (edited)
+              </Typography>
+            </Tooltip>
+          )}
+
+          {canModify && !editing && (
+            <Stack direction="row" sx={{ ml: 'auto' }}>
+              <Tooltip title="Edit">
+                <IconButton size="small" onClick={() => setEditing(true)} disabled={busy}>
+                  <EditIcon fontSize="inherit" />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Delete">
+                <IconButton
+                  size="small"
+                  color="error"
+                  onClick={() => onDelete(comment.id)}
+                  disabled={busy}
+                >
+                  <DeleteIcon fontSize="inherit" />
+                </IconButton>
+              </Tooltip>
+            </Stack>
+          )}
         </Stack>
-        {/* pre-wrap keeps the line breaks the author typed. */}
-        <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-          {comment.body}
-        </Typography>
+
+        {editing ? (
+          <Stack spacing={1} sx={{ mt: 1 }}>
+            <TextField
+              fullWidth
+              multiline
+              size="small"
+              value={draft}
+              disabled={busy}
+              onChange={(event) => setDraft(event.target.value)}
+              error={draft.length > MAX_LENGTH}
+            />
+            <Stack direction="row" spacing={1}>
+              <Button
+                size="small"
+                variant="contained"
+                onClick={submit}
+                disabled={busy || !draft.trim() || draft.length > MAX_LENGTH}
+              >
+                Save
+              </Button>
+              <Button
+                size="small"
+                onClick={() => {
+                  setDraft(comment.body)
+                  setEditing(false)
+                }}
+              >
+                Cancel
+              </Button>
+            </Stack>
+          </Stack>
+        ) : (
+          /* pre-wrap keeps the line breaks the author typed. */
+          <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            {comment.body}
+          </Typography>
+        )}
       </Box>
     </Stack>
   )
 }
 
 export default function CommentThread({ incidentId, isClosed }) {
+  const { user } = useAuth()
   const [status, setStatus] = useState('loading')
   const [comments, setComments] = useState([])
   const [loadError, setLoadError] = useState('')
@@ -73,6 +156,7 @@ export default function CommentThread({ incidentId, isClosed }) {
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState('')
+  const [busyId, setBusyId] = useState(null)
 
   useEffect(() => {
     let ignore = false
@@ -123,6 +207,42 @@ export default function CommentThread({ incidentId, isClosed }) {
     }
   }
 
+  /**
+   * Save an edited note. Returns true so the row can leave edit mode only when
+   * the server actually accepted it.
+   */
+  async function handleSave(commentId, body) {
+    setBusyId(commentId)
+    setSendError('')
+
+    try {
+      const data = await updateComment(incidentId, commentId, body)
+      setComments((current) =>
+        current.map((item) => (item.id === commentId ? data.comment : item)),
+      )
+      return true
+    } catch (error) {
+      setSendError(error.message)
+      return false
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function handleDelete(commentId) {
+    setBusyId(commentId)
+    setSendError('')
+
+    try {
+      await deleteComment(incidentId, commentId)
+      setComments((current) => current.filter((item) => item.id !== commentId))
+    } catch (error) {
+      setSendError(error.message)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   const tooLong = draft.length > MAX_LENGTH
 
   return (
@@ -148,7 +268,17 @@ export default function CommentThread({ incidentId, isClosed }) {
           ) : (
             <Stack spacing={2}>
               {comments.map((comment) => (
-                <Comment key={comment.id} comment={comment} />
+                <Comment
+                  key={comment.id}
+                  comment={comment}
+                  /* Authorship only — the backend refuses everyone else,
+                     including admins, so this just hides a doomed button. A
+                     closed incident seals the record entirely. */
+                  canModify={comment.author_id === user.id && !isClosed}
+                  onSave={handleSave}
+                  onDelete={handleDelete}
+                  busy={busyId === comment.id}
+                />
               ))}
             </Stack>
           )}

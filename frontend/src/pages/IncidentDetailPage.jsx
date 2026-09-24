@@ -37,7 +37,14 @@ import {
 } from '@mui/material'
 import { Link as RouterLink, useNavigate, useParams } from 'react-router-dom'
 
-import { deleteIncident, getIncident, listEngineers, updateIncident } from '../api/client'
+import {
+  acknowledgeEscalation,
+  deleteIncident,
+  getIncident,
+  listEngineers,
+  requestEscalation,
+  updateIncident,
+} from '../api/client'
 import useAuth from '../auth/useAuth'
 import CommentThread from '../components/CommentThread'
 import WorkflowStepper from '../components/WorkflowStepper'
@@ -45,6 +52,8 @@ import { isLocationArchived, locationPath } from '../facilities'
 import {
   ADMIN_SETTABLE,
   ENGINEER_SETTABLE,
+  PRIORITIES,
+  STATUS_BLOCKED,
   STATUS_CLOSED,
   categoryLabel,
   formatDateTime,
@@ -81,6 +90,12 @@ export default function IncidentDetailPage() {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [toast, setToast] = useState('')
+
+  const [blockedReason, setBlockedReason] = useState('')
+  const [pendingStatus, setPendingStatus] = useState('')
+  const [escalationReason, setEscalationReason] = useState('')
+  const [escalating, setEscalating] = useState(false)
+  const [escalationError, setEscalationError] = useState('')
 
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -169,6 +184,66 @@ export default function IncidentDetailPage() {
     [id],
   )
 
+  /** Ask for this incident — the caller's own report — to be treated as urgent. */
+  async function handleEscalate() {
+    const reason = escalationReason.trim()
+    if (!reason || escalating) {
+      return
+    }
+
+    setEscalating(true)
+    setEscalationError('')
+
+    try {
+      const data = await requestEscalation(id, reason)
+      setIncident(data.incident)
+      setEscalationReason('')
+      setToast('Escalation requested. A Facility Admin will review it.')
+    } catch (error) {
+      setEscalationError(error.message)
+    } finally {
+      setEscalating(false)
+    }
+  }
+
+  /** Mark the escalation handled. The reason stays on the record. */
+  async function handleAcknowledge() {
+    setSaving(true)
+    try {
+      const data = await acknowledgeEscalation(id)
+      setIncident(data.incident)
+      setToast('Escalation marked as handled.')
+    } catch (error) {
+      setSaveError(error.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  /**
+   * Change the status, collecting a reason first when moving to BLOCKED.
+   *
+   * The API requires one, so the control asks for it rather than letting the
+   * user discover the rule through a rejection.
+   */
+  function handleStatusChange(next) {
+    if (next === STATUS_BLOCKED) {
+      setPendingStatus(next)
+      return
+    }
+    save({ status: next }, 'Status updated.')
+  }
+
+  function confirmBlock() {
+    const reason = blockedReason.trim()
+    if (!reason) {
+      return
+    }
+    save({ status: STATUS_BLOCKED, blocked_reason: reason }, 'Status updated.')
+    setPendingStatus('')
+    setBlockedReason('')
+  }
+
   /**
    * Delete the incident, then leave — the page it is showing no longer exists.
    *
@@ -200,6 +275,11 @@ export default function IncidentDetailPage() {
   // CLOSED is an admin's acceptance of the work, so it is absent from the
   // engineer's options. The backend rejects it too.
   const settableStatuses = isAdmin ? ADMIN_SETTABLE : ENGINEER_SETTABLE
+
+  // Escalation is the reporter's voice, and only while the ticket is live.
+  const isReporter = incident && incident.created_by === user.id
+  const canEscalate =
+    incident && !['RESOLVED', STATUS_CLOSED].includes(incident.status)
 
   return (
     <Stack spacing={3}>
@@ -296,6 +376,28 @@ export default function IncidentDetailPage() {
               {incident.location && (incident.building_name || incident.location_snapshot) && (
                 <DetailRow label="Details">{incident.location}</DetailRow>
               )}
+              <DetailRow label="Priority">
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  label={priorityDisplay(incident.priority).label}
+                  color={priorityDisplay(incident.priority).color}
+                />
+              </DetailRow>
+              {incident.status === STATUS_BLOCKED && incident.blocked_reason && (
+                <DetailRow label="Blocked because">{incident.blocked_reason}</DetailRow>
+              )}
+              {incident.escalation_requested && (
+                <DetailRow label="Escalation">
+                  <Chip size="small" color="error" label="Escalation requested" />
+                  <Typography variant="body2" sx={{ mt: 0.5 }}>
+                    {incident.escalation_reason}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" display="block">
+                    Requested {formatDateTime(incident.escalated_at)}
+                  </Typography>
+                </DetailRow>
+              )}
               <DetailRow label="Reported">{formatDateTime(incident.created_at)}</DetailRow>
               <DetailRow label="Last updated">{formatDateTime(incident.updated_at)}</DetailRow>
             </Box>
@@ -323,9 +425,7 @@ export default function IncidentDetailPage() {
                         value={incident.status}
                         disabled={saving}
                         sx={{ minWidth: 220 }}
-                        onChange={(event) =>
-                          save({ status: event.target.value }, 'Status updated.')
-                        }
+                        onChange={(event) => handleStatusChange(event.target.value)}
                       >
                         {/* A closed incident keeps CLOSED visible in its own
                             dropdown even for an engineer, so the current value
@@ -365,8 +465,125 @@ export default function IncidentDetailPage() {
                         ))}
                       </TextField>
                     )}
+                    {isAdmin && (
+                      <TextField
+                        select
+                        size="small"
+                        label="Priority"
+                        value={incident.priority}
+                        disabled={saving}
+                        sx={{ minWidth: 180 }}
+                        onChange={(event) =>
+                          save({ priority: event.target.value }, 'Priority updated.')
+                        }
+                        helperText="Only an admin can re-prioritise"
+                      >
+                        {PRIORITIES.map((priority) => (
+                          <MenuItem key={priority.value} value={priority.value}>
+                            {priority.label}
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                    )}
+                  </Stack>
+
+                  {/* Asked for up front, because the API requires a reason and
+                      a rejection afterwards would lose what was typed. */}
+                  {pendingStatus === STATUS_BLOCKED && (
+                    <Stack spacing={1} sx={{ mt: 2 }}>
+                      <TextField
+                        fullWidth
+                        size="small"
+                        label="Why is this blocked?"
+                        value={blockedReason}
+                        disabled={saving}
+                        onChange={(event) => setBlockedReason(event.target.value)}
+                      />
+                      <Stack direction="row" spacing={1}>
+                        <Button
+                          size="small"
+                          variant="contained"
+                          onClick={confirmBlock}
+                          disabled={saving || !blockedReason.trim()}
+                        >
+                          Mark blocked
+                        </Button>
+                        <Button
+                          size="small"
+                          onClick={() => {
+                            setPendingStatus('')
+                            setBlockedReason('')
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      </Stack>
+                    </Stack>
+                  )}
+
+                  {isAdmin && incident.escalation_requested && (
+                    <Alert
+                      severity="warning"
+                      sx={{ mt: 2 }}
+                      action={
+                        <Button color="inherit" size="small" onClick={handleAcknowledge}
+                                disabled={saving}>
+                          Mark handled
+                        </Button>
+                      }
+                    >
+                      The reporter asked for this to be escalated.
+                    </Alert>
+                  )}
+                </Box>
+              </>
+            )}
+
+            {/* The reporter's half of escalation: state a case, an admin decides.
+                Hidden once the ticket is finished, which the API also enforces. */}
+            {isReporter && !incident.escalation_requested && canEscalate && (
+              <>
+                <Divider />
+                <Box>
+                  <Typography variant="subtitle2" gutterBottom>
+                    Need this looked at sooner?
+                  </Typography>
+
+                  {escalationError && (
+                    <Alert severity="error" sx={{ mb: 2 }}>
+                      {escalationError}
+                    </Alert>
+                  )}
+
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                    <TextField
+                      fullWidth
+                      size="small"
+                      label="Why is this urgent?"
+                      value={escalationReason}
+                      disabled={escalating}
+                      onChange={(event) => setEscalationReason(event.target.value)}
+                    />
+                    <Button
+                      variant="outlined"
+                      color="warning"
+                      onClick={handleEscalate}
+                      disabled={escalating || !escalationReason.trim()}
+                      sx={{ flexShrink: 0 }}
+                    >
+                      {escalating ? 'Sending…' : 'Request escalation'}
+                    </Button>
                   </Stack>
                 </Box>
+              </>
+            )}
+
+            {isReporter && incident.escalation_requested && (
+              <>
+                <Divider />
+                <Alert severity="info">
+                  Your escalation request is with a Facility Admin.
+                </Alert>
               </>
             )}
 

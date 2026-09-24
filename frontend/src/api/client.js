@@ -196,9 +196,36 @@ export function createIncident({
   })
 }
 
-/** List the incidents the signed-in user reported, newest first. */
-export function listIncidents() {
-  return get('/incidents')
+/**
+ * Turn a filter object into a query string, dropping empty values so that
+ * "no filter" and "filter for nothing" stay distinct.
+ */
+function withFilters(path, filters = {}) {
+  const params = new URLSearchParams()
+
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== '' && value !== null && value !== undefined) {
+      params.set(key, value)
+    }
+  }
+
+  const query = params.toString()
+  return query ? `${path}?${query}` : path
+}
+
+/**
+ * List the incidents the signed-in user reported, newest first.
+ *
+ * Filters narrow the caller's own list. The backend applies its creator scope
+ * first, so no filter here can reach another person's incidents.
+ */
+export function listIncidents(filters) {
+  return get(withFilters('/incidents', filters))
+}
+
+/** Counts by status, priority and category for the caller's own reports. */
+export function getMySummary() {
+  return get('/incidents/summary')
 }
 
 /**
@@ -210,8 +237,13 @@ export function getIncident(id) {
 }
 
 /** An engineer's work queue: incidents assigned to them. Engineers only. */
-export function listAssignedIncidents() {
-  return get('/incidents/assigned')
+export function listAssignedIncidents(filters) {
+  return get(withFilters('/incidents/assigned', filters))
+}
+
+/** Counts for the signed-in engineer's own queue. Engineers only. */
+export function getAssignedSummary() {
+  return get('/incidents/assigned/summary')
 }
 
 /**
@@ -236,9 +268,19 @@ export function deleteIncident(id) {
 
 // --- Facility Admin only. The backend refuses these for other roles. ---
 
-/** Users who can be assigned work: active, role ENGINEER. */
+/**
+ * Users who can be assigned work: active, role ENGINEER.
+ *
+ * Each row carries `is_available` and `active_count`, so the admin picks an
+ * assignee with the workload in front of them.
+ */
 export function listEngineers() {
   return get('/engineers')
+}
+
+/** Mark an engineer available or unavailable for new work. Admin only. */
+export function setEngineerAvailability(id, isAvailable) {
+  return patch(`/users/${id}/availability`, { is_available: isAvailable })
 }
 
 // --- Facilities. Reads are open to everyone; writes are admin-only. ---
@@ -306,6 +348,31 @@ export function createComment(incidentId, body) {
   return post(`/incidents/${incidentId}/comments`, { body })
 }
 
+/** Reword your own comment. The backend refuses anyone else's, admins included. */
+export function updateComment(incidentId, commentId, body) {
+  return patch(`/incidents/${incidentId}/comments/${commentId}`, { body })
+}
+
+/** Withdraw your own comment. */
+export function deleteComment(incidentId, commentId) {
+  return del(`/incidents/${incidentId}/comments/${commentId}`)
+}
+
+/**
+ * Ask for your own incident to be treated as more urgent.
+ *
+ * Deliberately not a priority change: the reporter states a case and an admin
+ * decides. Only the reporter may call it, and only while the ticket is live.
+ */
+export function requestEscalation(incidentId, reason) {
+  return post(`/incidents/${incidentId}/escalation`, { reason })
+}
+
+/** Mark an escalation as handled. Facility Admin only; the reason is kept. */
+export function acknowledgeEscalation(incidentId) {
+  return del(`/incidents/${incidentId}/escalation`)
+}
+
 /**
  * Every incident in the organisation, newest first, with reporter details.
  *
@@ -313,17 +380,8 @@ export function createComment(incidentId, body) {
  * than sent as blanks, so "no filter" and "filter for nothing" stay distinct.
  * Filtering runs in the database, so the browser never receives rows it hides.
  */
-export function listAllIncidents(filters = {}) {
-  const params = new URLSearchParams()
-
-  for (const [key, value] of Object.entries(filters)) {
-    if (value !== '' && value !== null && value !== undefined) {
-      params.set(key, value)
-    }
-  }
-
-  const query = params.toString()
-  return get(`/admin/incidents${query ? `?${query}` : ''}`)
+export function listAllIncidents(filters) {
+  return get(withFilters('/admin/incidents', filters))
 }
 
 /** Incident totals by status, category and building. Facility Admin only. */

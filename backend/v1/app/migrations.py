@@ -290,6 +290,56 @@ _MIGRATIONS: list[Migration] = [
             ON incident_comments (incident_id, created_at);
         """,
     ),
+    Migration(
+        version=7,
+        name="lifecycle_escalation_availability",
+        # Four requirements at once, because they are all small columns on
+        # existing tables and one migration is cheaper than four.
+        #
+        # LIFECYCLE TIMESTAMPS answer "how quickly are incidents acknowledged,
+        # assigned and resolved?". updated_at cannot: it only remembers the most
+        # recent change, so a ticket resolved on Tuesday and commented on Friday
+        # would report the wrong duration. Each column records the FIRST time its
+        # event happened and is never overwritten, so reopening a ticket does not
+        # erase how long the original fix took.
+        #
+        # ESCALATION is a flag plus the reason, not a workflow. The reason
+        # survives acknowledgement so the history still reads.
+        #
+        # blocked_reason answers the other half of "which incidents are escalated
+        # or blocked, and why?".
+        #
+        # is_available sits on users rather than in an engineer_profiles table.
+        # An engineer is a user with a role, so a separate table would mean a
+        # join and a second row to keep in step for one boolean. It defaults TRUE
+        # so existing engineers stay assignable.
+        #
+        # edited_at is NULL until a comment is edited, which makes it both the
+        # timestamp and the "Edited" indicator without a second column.
+        sql="""
+        ALTER TABLE incidents
+            ADD COLUMN IF NOT EXISTS acknowledged_at     TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS assigned_at         TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS resolved_at         TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS closed_at           TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS escalation_requested BOOLEAN NOT NULL DEFAULT FALSE,
+            ADD COLUMN IF NOT EXISTS escalation_reason   TEXT,
+            ADD COLUMN IF NOT EXISTS escalated_at        TIMESTAMPTZ,
+            ADD COLUMN IF NOT EXISTS blocked_reason      TEXT;
+
+        ALTER TABLE users
+            ADD COLUMN IF NOT EXISTS is_available BOOLEAN NOT NULL DEFAULT TRUE;
+
+        ALTER TABLE incident_comments
+            ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
+
+        -- Partial index: the admin's "what needs my attention" query asks only
+        -- for the escalated few, so indexing the FALSE majority would be wasted.
+        CREATE INDEX IF NOT EXISTS incidents_escalated_idx
+            ON incidents (escalation_requested)
+            WHERE escalation_requested;
+        """,
+    ),
 ]
 
 

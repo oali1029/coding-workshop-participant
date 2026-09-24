@@ -166,10 +166,11 @@ class TestEngineerWorkflow:
         _assign(invoke, admin_token, incident_id, engineer_user["user"]["id"])
 
         for status_value in ("IN_PROGRESS", "BLOCKED", "RESOLVED"):
+            # BLOCKED must say why; the other transitions ignore the extra field.
             status, body = invoke(
                 "PATCH",
                 f"/api/v1/incidents/{incident_id}",
-                {"status": status_value},
+                {"status": status_value, "blocked_reason": "Waiting on a spare part."},
                 token=engineer_user["token"],
             )
             assert status == 200

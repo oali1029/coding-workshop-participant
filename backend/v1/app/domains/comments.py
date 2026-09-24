@@ -5,14 +5,16 @@ module reuses ``incidents.may_view`` rather than restating the rule: the
 reporter, the assigned engineer, and any admin. An engineer gains nothing from
 being an engineer — only from being assigned.
 
-Comments are a permanent record. There is no edit or delete endpoint, so nobody
-can rewrite what was said, including their own words.
+Authorship governs editing and deleting, with no exception for admins. An admin
+reads every note and may add their own, but rewriting a colleague's words would
+make the whole record untrustworthy. An edit sets ``edited_at``, so a corrected
+note is visibly a corrected note rather than a silently rewritten one.
 
-A CLOSED incident keeps its comments readable but accepts no new ones. That
-matches the rest of the workflow, where CLOSED is an admin's acceptance that the
-work is finished; an admin who wants further discussion reopens the ticket
-first. The rule applies to admins too, so the history cannot grow after the
-ticket was declared complete.
+A CLOSED incident keeps its comments readable but accepts no changes at all —
+no new notes, no edits, no deletions. That matches the rest of the workflow,
+where CLOSED is an admin's acceptance that the work is finished; an admin who
+wants further discussion reopens the ticket first. The rule applies to admins
+too, so the history cannot shift after the ticket was declared complete.
 """
 
 import logging
@@ -29,12 +31,45 @@ MAX_BODY_LENGTH = 2000
 
 _COMMENT_SELECT = """
     SELECT
-        c.id, c.incident_id, c.author_id, c.body, c.created_at,
+        c.id, c.incident_id, c.author_id, c.body, c.created_at, c.edited_at,
         author.full_name AS author_name,
         author.role      AS author_role
     FROM incident_comments c
     JOIN users author ON author.id = c.author_id
 """
+
+
+def _own_comment(request: Request, incident: dict[str, Any]) -> dict[str, Any]:
+    """Load the comment this request addresses, insisting the caller wrote it.
+
+    Authorship is the rule for editing and deleting, and it has no exceptions:
+    an admin may read every note and add their own, but rewriting somebody
+    else's words would make the record untrustworthy for everyone. An admin who
+    needs a note gone can delete the whole incident.
+
+    Raises:
+        NotFoundError: no such comment, or not on this incident.
+        ForbiddenError: somebody else wrote it.
+    """
+    try:
+        comment_id = int(request.path_params["comment_id"])
+    except (KeyError, ValueError):
+        raise NotFoundError("Comment not found.")
+
+    comment = db.query_one(
+        "SELECT id, author_id FROM incident_comments WHERE id = %s AND incident_id = %s",
+        (comment_id, incident["id"]),
+    )
+
+    if comment is None:
+        raise NotFoundError("Comment not found.")
+
+    # 403 rather than 404 here: the caller can already see this comment in the
+    # thread, so there is nothing to hide — only an action to refuse.
+    if comment["author_id"] != request.user["id"]:
+        raise ForbiddenError("You can only change your own comments.")
+
+    return comment
 
 
 def _incident_for_comment(request: Request) -> dict[str, Any]:
@@ -110,3 +145,70 @@ def create(request: Request) -> dict[str, Any]:
     comment = db.query_one(f"{_COMMENT_SELECT} WHERE c.id = %s", (row["id"],))
 
     return created({"comment": comment})
+
+
+def update(request: Request) -> dict[str, Any]:
+    """Correct the wording of your own comment.
+
+    Only the body changes. The author, the incident and the original created_at
+    are never writable, so an edit cannot turn one person's note into another's
+    or move it onto a different ticket. edited_at records that it happened,
+    which is what puts the "Edited" marker in the thread.
+
+    A closed incident refuses edits for the same reason it refuses new comments:
+    CLOSED is the admin's acceptance that the ticket is finished, and the record
+    behind it stops changing.
+
+    Raises:
+        NotFoundError: unknown incident or comment, or one the caller cannot see.
+        ForbiddenError: the incident is closed, or somebody else wrote it.
+        ValidationError: blank, whitespace-only, or over-length body.
+    """
+    incident = _incident_for_comment(request)
+
+    if incident["status"] == STATUS_CLOSED:
+        raise ForbiddenError(
+            "This incident is closed. An administrator must reopen it before "
+            "its comments can be changed."
+        )
+
+    comment = _own_comment(request, incident)
+    body = require_text(request.json_body(), "body", MAX_BODY_LENGTH)
+
+    db.execute(
+        "UPDATE incident_comments SET body = %s, edited_at = now() WHERE id = %s",
+        (body, comment["id"]),
+    )
+
+    logger.info("User %s edited comment %s", request.user["id"], comment["id"])
+
+    updated = db.query_one(f"{_COMMENT_SELECT} WHERE c.id = %s", (comment["id"],))
+
+    return ok({"comment": updated})
+
+
+def delete(request: Request) -> dict[str, Any]:
+    """Remove your own comment.
+
+    Same authorship and closed-incident rules as editing: you may withdraw what
+    you said while the ticket is still live, and nobody may withdraw it for you.
+
+    Raises:
+        NotFoundError: unknown incident or comment, or one the caller cannot see.
+        ForbiddenError: the incident is closed, or somebody else wrote it.
+    """
+    incident = _incident_for_comment(request)
+
+    if incident["status"] == STATUS_CLOSED:
+        raise ForbiddenError(
+            "This incident is closed. An administrator must reopen it before "
+            "its comments can be changed."
+        )
+
+    comment = _own_comment(request, incident)
+
+    db.execute("DELETE FROM incident_comments WHERE id = %s", (comment["id"],))
+
+    logger.info("User %s deleted comment %s", request.user["id"], comment["id"])
+
+    return ok({"deleted": comment["id"]})

@@ -288,6 +288,35 @@ def engineer_user(unique_email):
 
 
 @pytest.fixture
+def second_engineer(unique_email):
+    """A second signed-in ENGINEER, for testing that one engineer cannot see
+    another's queue."""
+    from app.domains import auth
+
+    email = f"engineer2-{unique_email}"
+    password = "Engineer2Passw0rd!"
+
+    auth.register(
+        _make_request(
+            "POST",
+            "/auth/register",
+            body={"full_name": "Other Engineer", "email": email, "password": password},
+        )
+    )
+    db.execute(
+        "UPDATE users SET role = %s WHERE email = %s", (security.ROLE_ENGINEER, email)
+    )
+
+    payload = _json(
+        auth.login(
+            _make_request("POST", "/auth/login", body={"email": email, "password": password})
+        )
+    )
+
+    return {"email": email, "token": payload["token"], "user": payload["user"]}
+
+
+@pytest.fixture
 def admin_token():
     """A token for the seeded FACILITY_ADMIN — the suite's own, not the real one."""
     from app.domains import auth

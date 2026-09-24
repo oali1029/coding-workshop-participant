@@ -189,7 +189,8 @@ class TestCommentOrderingAndLifecycle:
         _comment(invoke, iid, registered_user["token"], "before")
 
         for value in ("IN_PROGRESS", "BLOCKED", "RESOLVED"):
-            invoke("PATCH", f"/api/v1/incidents/{iid}", {"status": value},
+            invoke("PATCH", f"/api/v1/incidents/{iid}",
+                   {"status": value, "blocked_reason": "Waiting on a part."},
                    token=engineer_user["token"])
 
         _, body = invoke("GET", f"/api/v1/incidents/{iid}/comments", token=admin_token)

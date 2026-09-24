@@ -14,17 +14,13 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
-import ClearIcon from '@mui/icons-material/Clear'
-import SearchIcon from '@mui/icons-material/Search'
+import PriorityHighIcon from '@mui/icons-material/PriorityHigh'
 import {
   Alert,
   Box,
-  Button,
   Chip,
   CircularProgress,
-  InputAdornment,
   LinearProgress,
-  MenuItem,
   Paper,
   Snackbar,
   Stack,
@@ -33,31 +29,17 @@ import {
   TableCell,
   TableHead,
   TableRow,
-  TextField,
+  Tooltip,
   Typography,
 } from '@mui/material'
 import { useMediaQuery } from 'react-responsive'
 import { useLocation, useNavigate } from 'react-router-dom'
 
 import { listAllIncidents, listBuildings, listEngineers } from '../api/client'
+import IncidentFilters from '../components/IncidentFilters'
 import { buildingLabel } from '../facilities'
-import {
-  ADMIN_SETTABLE,
-  CATEGORIES,
-  categoryLabel,
-  formatDateTime,
-  priorityDisplay,
-  statusDisplay,
-} from '../incidents'
-
-// Long enough to cover typing, short enough to feel immediate.
-const SEARCH_DEBOUNCE_MS = 300
-
-// The value the assignee dropdown uses for "nobody". The backend understands
-// this exact word — see list_all in backend/v1/app/domains/incidents.py.
-const UNASSIGNED = 'unassigned'
-
-const NO_FILTERS = { q: '', status: '', category: '', building: '', assignee: '' }
+import { NO_FILTERS, useDebouncedSearch } from '../filters'
+import { categoryLabel, formatDateTime, priorityDisplay, statusDisplay } from '../incidents'
 
 export default function AdminIncidentsPage() {
   const [status, setStatus] = useState('loading')
@@ -71,9 +53,7 @@ export default function AdminIncidentsPage() {
   // into state by an effect, which React warns about.
   const notice = location.state?.notice || ''
 
-  // What the user typed, and the debounced copy the request actually uses.
   const [search, setSearch] = useState('')
-  const [appliedSearch, setAppliedSearch] = useState('')
   const [filters, setFilters] = useState(NO_FILTERS)
   // The query the rows on screen were fetched with, so a refetch in progress is
   // simply "this does not match the current query".
@@ -86,10 +66,7 @@ export default function AdminIncidentsPage() {
 
   const isCompact = useMediaQuery({ maxWidth: 900 })
 
-  useEffect(() => {
-    const timer = setTimeout(() => setAppliedSearch(search), SEARCH_DEBOUNCE_MS)
-    return () => clearTimeout(timer)
-  }, [search])
+  const appliedSearch = useDebouncedSearch(search)
 
   useEffect(() => {
     let ignore = false
@@ -181,100 +158,16 @@ export default function AdminIncidentsPage() {
         </Typography>
       </Box>
 
-      <Paper variant="outlined" sx={{ p: 2 }}>
-        <Stack spacing={2}>
-          <TextField
-            fullWidth
-            size="small"
-            label="Search"
-            placeholder="Title, description, reporter or engineer"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            slotProps={{
-              input: {
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon fontSize="small" />
-                  </InputAdornment>
-                ),
-              },
-            }}
-          />
-
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} flexWrap="wrap" useFlexGap>
-            <TextField
-              select
-              size="small"
-              label="Status"
-              value={filters.status}
-              onChange={(event) => setFilter('status', event.target.value)}
-              sx={{ minWidth: 180 }}
-            >
-              <MenuItem value="">Any status</MenuItem>
-              {ADMIN_SETTABLE.map((value) => (
-                <MenuItem key={value} value={value}>
-                  {statusDisplay(value).label}
-                </MenuItem>
-              ))}
-            </TextField>
-
-            <TextField
-              select
-              size="small"
-              label="Category"
-              value={filters.category}
-              onChange={(event) => setFilter('category', event.target.value)}
-              sx={{ minWidth: 180 }}
-            >
-              <MenuItem value="">Any category</MenuItem>
-              {CATEGORIES.map((category) => (
-                <MenuItem key={category.value} value={category.value}>
-                  {category.label}
-                </MenuItem>
-              ))}
-            </TextField>
-
-            <TextField
-              select
-              size="small"
-              label="Building"
-              value={filters.building}
-              onChange={(event) => setFilter('building', event.target.value)}
-              sx={{ minWidth: 180 }}
-            >
-              <MenuItem value="">Any building</MenuItem>
-              {buildings.map((building) => (
-                <MenuItem key={building.id} value={building.id}>
-                  {building.name}
-                </MenuItem>
-              ))}
-            </TextField>
-
-            <TextField
-              select
-              size="small"
-              label="Assigned to"
-              value={filters.assignee}
-              onChange={(event) => setFilter('assignee', event.target.value)}
-              sx={{ minWidth: 200 }}
-            >
-              <MenuItem value="">Anyone</MenuItem>
-              <MenuItem value={UNASSIGNED}>Unassigned</MenuItem>
-              {engineers.map((engineer) => (
-                <MenuItem key={engineer.id} value={engineer.id}>
-                  {engineer.full_name}
-                </MenuItem>
-              ))}
-            </TextField>
-
-            {isFiltered && (
-              <Button size="small" startIcon={<ClearIcon />} onClick={clearAll}>
-                Clear
-              </Button>
-            )}
-          </Stack>
-        </Stack>
-      </Paper>
+      <IncidentFilters
+        search={search}
+        onSearchChange={setSearch}
+        filters={filters}
+        onFilterChange={setFilter}
+        onClear={clearAll}
+        buildings={buildings}
+        engineers={engineers}
+        isFiltered={isFiltered}
+      />
 
       {status === 'loading' && (
         <Stack alignItems="center" sx={{ py: 6 }}>
@@ -329,7 +222,19 @@ export default function AdminIncidentsPage() {
                       onClick={() => navigate(`/incidents/${incident.id}`)}
                       sx={{ cursor: 'pointer' }}
                     >
-                      <TableCell>{incident.title}</TableCell>
+                      <TableCell>
+                        <Stack direction="row" spacing={0.5} alignItems="center">
+                          {/* The admin is the one who acts on escalations, so
+                              they are flagged in the list rather than only on
+                              the detail page. */}
+                          {incident.escalation_requested && (
+                            <Tooltip title={incident.escalation_reason || 'Escalation requested'}>
+                              <PriorityHighIcon color="error" fontSize="small" />
+                            </Tooltip>
+                          )}
+                          <span>{incident.title}</span>
+                        </Stack>
+                      </TableCell>
                       <TableCell>
                         <Typography variant="body2">{incident.reporter_name}</Typography>
                         {!isCompact && (

@@ -59,6 +59,15 @@ INITIAL_STATUS = STATUS_OPEN
 MAX_TITLE_LENGTH = 200
 MAX_DESCRIPTION_LENGTH = 5000
 MAX_LOCATION_LENGTH = 200
+MAX_REASON_LENGTH = 500
+
+# The assignee filter value meaning "nobody". A word rather than an id, because
+# there is no id for absence.
+UNASSIGNED = "unassigned"
+
+# Statuses from which a reporter may ask for their incident to be escalated.
+# A finished ticket cannot be made more urgent; it can be reopened instead.
+ESCALATABLE_STATUSES = frozenset({STATUS_OPEN, STATUS_IN_PROGRESS, STATUS_BLOCKED})
 
 # One SELECT shared by every read, so all four endpoints return the same shape.
 #
@@ -73,6 +82,9 @@ _INCIDENT_SELECT = """
         i.id, i.title, i.description, i.category, i.priority, i.status, i.location,
         i.created_by, i.assignee_id, i.created_at, i.updated_at,
         i.building_id, i.floor_id, i.seat_id, i.location_snapshot,
+        i.acknowledged_at, i.assigned_at, i.resolved_at, i.closed_at,
+        i.escalation_requested, i.escalation_reason, i.escalated_at,
+        i.blocked_reason,
         reporter.full_name AS reporter_name,
         reporter.email     AS reporter_email,
         assignee.full_name AS assignee_name,
@@ -204,6 +216,98 @@ def _required_id(body: dict[str, Any], field: str) -> int:
         raise ValidationError("This field is required.", details={"field": field})
 
 
+def build_filters(query: dict[str, str], allow_assignee: bool) -> tuple[list[str], list[Any]]:
+    """Turn query parameters into SQL conditions and their values.
+
+    Shared by all three list endpoints so the filters behave identically
+    wherever they appear. What differs between the endpoints is the scoping
+    clause each one adds — ``created_by = me``, ``assignee_id = me``, or nothing
+    for an admin — and that stays in the handler where it is easy to audit. This
+    helper can only narrow a result set, never widen one.
+
+    Only fixed fragments reach the SQL text; every value is a parameter.
+
+    Args:
+        allow_assignee: whether to honour the ``assignee`` parameter. False for
+            the personal lists, where the assignee is already fixed by scope.
+
+    Raises:
+        ValidationError: a filter value outside its permitted set.
+    """
+    conditions: list[str] = []
+    params: list[Any] = []
+
+    search = (query.get("q") or "").strip()
+    if search:
+        # ILIKE is case-insensitive and needs no extension. At this scale a scan
+        # is fine; a trigram index would be the next step if it ever is not.
+        conditions.append(
+            """(
+                i.title ILIKE %s OR i.description ILIKE %s
+                OR reporter.full_name ILIKE %s OR assignee.full_name ILIKE %s
+            )"""
+        )
+        params.extend([f"%{_escape_like(search)}%"] * 4)
+
+    for field, column, allowed in (
+        ("status", "i.status", STATUSES),
+        ("category", "i.category", CATEGORIES),
+        ("priority", "i.priority", PRIORITIES),
+    ):
+        value = (query.get(field) or "").strip().upper()
+        if not value:
+            continue
+        if value not in allowed:
+            raise ValidationError(
+                f"Must be one of: {', '.join(allowed)}.", details={"field": field}
+            )
+        conditions.append(f"{column} = %s")
+        params.append(value)
+
+    building = (query.get("building") or "").strip()
+    if building:
+        try:
+            building_id = int(building)
+        except ValueError:
+            raise ValidationError("Invalid building.", details={"field": "building"})
+        conditions.append("i.building_id = %s")
+        params.append(building_id)
+
+    assignee = (query.get("assignee") or "").strip()
+    if assignee and allow_assignee:
+        if assignee.lower() == UNASSIGNED:
+            conditions.append("i.assignee_id IS NULL")
+        else:
+            try:
+                assignee_id = int(assignee)
+            except ValueError:
+                raise ValidationError("Invalid assignee.", details={"field": "assignee"})
+            conditions.append("i.assignee_id = %s")
+            params.append(assignee_id)
+
+    return conditions, params
+
+
+def _listing(scope_sql: str, scope_params: list[Any], request: Request,
+             allow_assignee: bool = False) -> dict[str, Any]:
+    """Run one of the three incident lists: scope first, then optional filters.
+
+    The scope clause is always present and always first, so a filter can never
+    remove the restriction that decides whose incidents these are.
+    """
+    conditions, params = build_filters(request.query, allow_assignee)
+
+    where = " AND ".join([*( [scope_sql] if scope_sql else [] ), *conditions])
+    where_sql = f" WHERE {where}" if where else ""
+
+    rows = db.query_all(
+        f"{_INCIDENT_SELECT}{where_sql} ORDER BY i.created_at DESC",
+        tuple([*scope_params, *params]),
+    )
+
+    return ok({"incidents": rows})
+
+
 def _escape_like(value: str) -> str:
     """Make a search term match literally inside an ILIKE pattern.
 
@@ -283,17 +387,16 @@ def create(request: Request) -> dict[str, Any]:
 
 
 def list_mine(request: Request) -> dict[str, Any]:
-    """Incidents the signed-in user reported, newest first.
+    """Incidents the signed-in user reported, newest first, optionally filtered.
 
-    Creator-scoped for every role, permanently. The WHERE clause is the
-    authorization: no code path here returns another user's incidents.
+    Creator-scoped for every role, permanently. The scope clause is the
+    authorization: no filter can widen it, so no code path here returns another
+    user's incidents.
+
+    Filters: q, status, category, priority, building. Not assignee — every
+    incident in this list is already the caller's own report.
     """
-    rows = db.query_all(
-        f"{_INCIDENT_SELECT} WHERE i.created_by = %s ORDER BY i.created_at DESC",
-        (request.user["id"],),
-    )
-
-    return ok({"incidents": rows})
+    return _listing("i.created_by = %s", [request.user["id"]], request)
 
 
 def list_assigned(request: Request) -> dict[str, Any]:
@@ -302,94 +405,24 @@ def list_assigned(request: Request) -> dict[str, Any]:
     Restricted to ENGINEER by the route table. Separate from ``list_mine`` so an
     engineer who reports a fault and is assigned a different one sees each in the
     right place — and sees a ticket in both if they were assigned their own report.
-    """
-    rows = db.query_all(
-        f"{_INCIDENT_SELECT} WHERE i.assignee_id = %s ORDER BY i.created_at DESC",
-        (request.user["id"],),
-    )
 
-    return ok({"incidents": rows})
+    Same filters as list_mine; the assignee is fixed by the scope.
+    """
+    return _listing("i.assignee_id = %s", [request.user["id"]], request)
 
 
 def list_all(request: Request) -> dict[str, Any]:
     """Every incident in the organisation, newest first, optionally filtered.
 
     The Facility Admin's oversight view. Restricted to FACILITY_ADMIN by the
-    route table, so there is no role check here.
+    route table, so there is no scope clause — an admin sees everything.
 
-    Query parameters, all optional and combined with AND:
-
-        q          case-insensitive match on title, description, reporter or
-                   assignee name
-        status     one of STATUSES
-        category   one of CATEGORIES
-        building   building id
-        assignee   engineer id, or "unassigned"
-
-    Filtering happens in PostgreSQL rather than the browser, so the client never
-    receives rows it then hides.
+    Filters: q, status, category, priority, building, and assignee (an engineer
+    id, or "unassigned"). All optional, combined with AND. Filtering happens in
+    PostgreSQL rather than the browser, so the client never receives rows it
+    then hides.
     """
-    query = request.query
-    conditions: list[str] = []
-    params: list[Any] = []
-
-    search = (query.get("q") or "").strip()
-    if search:
-        # ILIKE is case-insensitive and needs no extension. At this scale a scan
-        # is fine; a trigram index would be the next step if it ever is not.
-        conditions.append(
-            """(
-                i.title ILIKE %s OR i.description ILIKE %s
-                OR reporter.full_name ILIKE %s OR assignee.full_name ILIKE %s
-            )"""
-        )
-        params.extend([f"%{_escape_like(search)}%"] * 4)
-
-    status = (query.get("status") or "").strip().upper()
-    if status:
-        if status not in STATUSES:
-            raise ValidationError(
-                f"Must be one of: {', '.join(STATUSES)}.", details={"field": "status"}
-            )
-        conditions.append("i.status = %s")
-        params.append(status)
-
-    category = (query.get("category") or "").strip().upper()
-    if category:
-        if category not in CATEGORIES:
-            raise ValidationError(
-                f"Must be one of: {', '.join(CATEGORIES)}.", details={"field": "category"}
-            )
-        conditions.append("i.category = %s")
-        params.append(category)
-
-    building = (query.get("building") or "").strip()
-    if building:
-        try:
-            params.append(int(building))
-        except ValueError:
-            raise ValidationError("Invalid building.", details={"field": "building"})
-        conditions.append("i.building_id = %s")
-
-    assignee = (query.get("assignee") or "").strip()
-    if assignee:
-        if assignee.lower() == "unassigned":
-            conditions.append("i.assignee_id IS NULL")
-        else:
-            try:
-                params.append(int(assignee))
-            except ValueError:
-                raise ValidationError("Invalid assignee.", details={"field": "assignee"})
-            conditions.append("i.assignee_id = %s")
-
-    # Only fixed fragments reach the SQL text; every value is a parameter.
-    where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-
-    rows = db.query_all(
-        f"{_INCIDENT_SELECT}{where} ORDER BY i.created_at DESC", tuple(params)
-    )
-
-    return ok({"incidents": rows})
+    return _listing("", [], request, allow_assignee=True)
 
 
 def get_one(request: Request) -> dict[str, Any]:
@@ -420,7 +453,7 @@ def may_view(user: dict[str, Any], incident: dict[str, Any]) -> bool:
     return user["id"] in (incident["created_by"], incident["assignee_id"])
 
 
-def _resolve_assignee(body: dict[str, Any]) -> int | None:
+def _resolve_assignee(body: dict[str, Any], current_assignee_id: int | None = None) -> int | None:
     """Validate the requested assignee and return their id, or None to unassign.
 
     Only an **active user whose exact role is ENGINEER** may hold work. Checked
@@ -430,6 +463,13 @@ def _resolve_assignee(body: dict[str, Any]) -> int | None:
 
     Admins are deliberately not assignable — they can act on any incident without
     being assigned, so an assignment would add nothing.
+
+    An engineer marked unavailable takes no *new* work, but an assignment they
+    already hold is left alone: re-sending the same assignee is accepted, so
+    editing an incident's status does not force the admin to move its ticket.
+
+    Args:
+        current_assignee_id: who holds the incident now, used for that exemption.
     """
     value = body["assignee_id"]
 
@@ -445,7 +485,7 @@ def _resolve_assignee(body: dict[str, Any]) -> int | None:
         )
 
     candidate = db.query_one(
-        "SELECT id, role, is_active FROM users WHERE id = %s", (assignee_id,)
+        "SELECT id, role, is_active, is_available FROM users WHERE id = %s", (assignee_id,)
     )
 
     if (
@@ -460,21 +500,39 @@ def _resolve_assignee(body: dict[str, Any]) -> int | None:
             details={"field": "assignee_id"},
         )
 
+    if not candidate["is_available"] and candidate["id"] != current_assignee_id:
+        # A distinct message from the one above: this is a real engineer the
+        # admin can see, so being told why is useful rather than a leak.
+        raise ValidationError(
+            "That engineer is marked unavailable and cannot take new work.",
+            details={"field": "assignee_id"},
+        )
+
     return candidate["id"]
 
 
 def update(request: Request) -> dict[str, Any]:
-    """Change an incident's status, its assignee, or both.
+    """Change an incident's status, assignee, priority, or blocked reason.
 
     Engineers may work incidents assigned to them; admins may act on any. The
     route table already restricted this to those two roles, so the checks here
-    are about *which* incident and *which* status.
+    are about *which* incident and *which* fields.
+
+    Priority is admin-only. An employee asks for urgency through an escalation
+    request (see request_escalation) and an admin decides; letting the engineer
+    doing the work re-rank it would undo that conversation.
+
+    Entering BLOCKED requires a reason, so "which incidents are blocked and why"
+    is always answerable. Leaving BLOCKED clears it, so a stale reason can never
+    be shown against a ticket that is moving again.
 
     Raises:
         NotFoundError: unknown incident, or one the caller has no claim on.
-        ForbiddenError: assigning without being an admin, setting a status the
-            caller's role may not set, or an engineer touching a closed ticket.
-        ValidationError: nothing to change, or an invalid status or assignee.
+        ForbiddenError: assigning or re-prioritising without being an admin,
+            setting a status the caller's role may not set, or an engineer
+            touching a closed ticket.
+        ValidationError: nothing to change, an invalid value, or BLOCKED without
+            a reason.
     """
     incident_id = _incident_id(request)
     body = request.json_body()
@@ -501,19 +559,31 @@ def update(request: Request) -> dict[str, Any]:
 
     wants_status = "status" in body
     wants_assignee = "assignee_id" in body
+    wants_priority = "priority" in body
 
-    if not wants_status and not wants_assignee:
-        raise ValidationError("Provide a status or an assignee to change.")
+    if not (wants_status or wants_assignee or wants_priority):
+        raise ValidationError("Provide a status, an assignee or a priority to change.")
 
-    # Reassignment is oversight, not fieldwork. Rejected outright rather than
-    # applying the status half of the request, so a refused call changes nothing.
+    # Both rejected outright rather than applying the rest of the request, so a
+    # refused call changes nothing at all.
     if wants_assignee and not is_admin:
         raise ForbiddenError("Only a Facility Admin can assign incidents.")
+
+    if wants_priority and not is_admin:
+        raise ForbiddenError(
+            "Only a Facility Admin can change priority. Request an escalation instead."
+        )
 
     # Build the SET clause from a fixed set of fragments. Nothing from the
     # request body ever becomes SQL text — only the values, as parameters.
     assignments = ["updated_at = now()"]
     params: list[Any] = []
+
+    # Any change made here is by an engineer or an admin, which is what
+    # acknowledgement means: someone responsible has picked the ticket up.
+    # COALESCE keeps the first such moment forever — a reopened ticket must not
+    # claim it was acknowledged the second time round.
+    assignments.append("acknowledged_at = COALESCE(acknowledged_at, now())")
 
     if wants_status:
         status = _require_choice(body, "status", STATUSES)
@@ -527,9 +597,35 @@ def update(request: Request) -> dict[str, Any]:
         assignments.append("status = %s")
         params.append(status)
 
+        if status == STATUS_BLOCKED:
+            reason = _optional_text(body, "blocked_reason", MAX_REASON_LENGTH)
+            if reason is None:
+                raise ValidationError(
+                    "Say why this incident is blocked.",
+                    details={"field": "blocked_reason"},
+                )
+            assignments.append("blocked_reason = %s")
+            params.append(reason)
+        else:
+            assignments.append("blocked_reason = NULL")
+
+        # First time each milestone is reached, never overwritten afterwards.
+        if status == STATUS_RESOLVED:
+            assignments.append("resolved_at = COALESCE(resolved_at, now())")
+        if status == STATUS_CLOSED:
+            assignments.append("closed_at = COALESCE(closed_at, now())")
+
     if wants_assignee:
+        assignee_id = _resolve_assignee(body, current["assignee_id"])
         assignments.append("assignee_id = %s")
-        params.append(_resolve_assignee(body))
+        params.append(assignee_id)
+
+        if assignee_id is not None:
+            assignments.append("assigned_at = COALESCE(assigned_at, now())")
+
+    if wants_priority:
+        assignments.append("priority = %s")
+        params.append(_require_choice(body, "priority", PRIORITIES))
 
     params.append(incident_id)
 
@@ -538,12 +634,88 @@ def update(request: Request) -> dict[str, Any]:
     )
 
     logger.info(
-        "User %s updated incident %s (status=%s assignee=%s)",
+        "User %s updated incident %s (status=%s assignee=%s priority=%s)",
         request.user["id"],
         incident_id,
         body.get("status") if wants_status else "unchanged",
         body.get("assignee_id") if wants_assignee else "unchanged",
+        body.get("priority") if wants_priority else "unchanged",
     )
+
+    return ok({"incident": _fetch(incident_id)})
+
+
+def request_escalation(request: Request) -> dict[str, Any]:
+    """The reporter asks for their own incident to be treated as more urgent.
+
+    Deliberately not a priority change. The employee states a case and an admin
+    decides — which keeps priority meaningful and stops the field becoming a
+    race between reporters.
+
+    Restricted to the reporter of an unfinished incident. An admin who wants
+    more urgency simply sets the priority.
+
+    Raises:
+        NotFoundError: unknown incident, or not the caller's own report.
+        ForbiddenError: the incident is already resolved or closed.
+        ValidationError: no reason given.
+    """
+    incident_id = _incident_id(request)
+    body = request.json_body()
+
+    incident = db.query_one(
+        "SELECT id, created_by, status FROM incidents WHERE id = %s", (incident_id,)
+    )
+
+    # Reporter only — not the assigned engineer, not an admin. 404 rather than
+    # 403 so the endpoint cannot be used to discover which incidents exist.
+    if incident is None or incident["created_by"] != request.user["id"]:
+        raise NotFoundError("Incident not found.")
+
+    if incident["status"] not in ESCALATABLE_STATUSES:
+        raise ForbiddenError("This incident is already finished and cannot be escalated.")
+
+    reason = require_text(body, "reason", MAX_REASON_LENGTH)
+
+    db.execute(
+        """
+        UPDATE incidents
+        SET escalation_requested = TRUE,
+            escalation_reason = %s,
+            escalated_at = now(),
+            updated_at = now()
+        WHERE id = %s
+        """,
+        (reason, incident_id),
+    )
+
+    logger.info("User %s requested escalation of incident %s", request.user["id"], incident_id)
+
+    return ok({"incident": _fetch(incident_id)})
+
+
+def acknowledge_escalation(request: Request) -> dict[str, Any]:
+    """The admin marks an escalation request as handled. Facility Admin only.
+
+    Clears the flag but keeps the reason and the timestamp, so the record still
+    says what was asked for and when — the request is answered, not erased.
+    """
+    incident_id = _incident_id(request)
+
+    row = db.query_one(
+        """
+        UPDATE incidents
+        SET escalation_requested = FALSE, updated_at = now()
+        WHERE id = %s
+        RETURNING id
+        """,
+        (incident_id,),
+    )
+
+    if row is None:
+        raise NotFoundError("Incident not found.")
+
+    logger.info("Admin %s acknowledged escalation on incident %s", request.user["id"], incident_id)
 
     return ok({"incident": _fetch(incident_id)})
 
