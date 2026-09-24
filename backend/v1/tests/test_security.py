@@ -215,11 +215,11 @@ class TestBootstrapAdminSeeding:
     def restore_admin_afterwards(self):
         import conftest
 
-        from app import db, migrations
+        from app import migrations
 
         yield
 
-        db.execute("DELETE FROM users WHERE email = %s", (security.SEED_ADMIN_EMAIL,))
+        conftest.remove_seed_admin()
         os.environ["BOOTSTRAP_ADMIN_PASSWORD"] = conftest.BOOTSTRAP_ADMIN_TEST_PASSWORD
         migrations.ensure_bootstrap_admin()
 
@@ -229,10 +229,12 @@ class TestBootstrapAdminSeeding:
         Every endpoint, including the health check, would otherwise fail over an
         optional convenience account.
         """
+        import conftest
+
         from app import db, migrations
 
         monkeypatch.delenv("BOOTSTRAP_ADMIN_PASSWORD", raising=False)
-        db.execute("DELETE FROM users WHERE email = %s", (security.SEED_ADMIN_EMAIL,))
+        conftest.remove_seed_admin()
 
         assert migrations.ensure_bootstrap_admin() is False
 
@@ -246,10 +248,12 @@ class TestBootstrapAdminSeeding:
         the deployer's environment happened to hold, undoing any change the
         administrator had made.
         """
+        import conftest
+
         from app import db, migrations
 
         monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "first-password-value")
-        db.execute("DELETE FROM users WHERE email = %s", (security.SEED_ADMIN_EMAIL,))
+        conftest.remove_seed_admin()
 
         assert migrations.ensure_bootstrap_admin() is True
 
@@ -271,10 +275,12 @@ class TestBootstrapAdminSeeding:
         assert after["password_hash"] == original["password_hash"]
 
     def test_password_is_stored_hashed(self, monkeypatch):
+        import conftest
+
         from app import db, migrations
 
         monkeypatch.setenv("BOOTSTRAP_ADMIN_PASSWORD", "hash-me-please")
-        db.execute("DELETE FROM users WHERE email = %s", (security.SEED_ADMIN_EMAIL,))
+        conftest.remove_seed_admin()
         migrations.ensure_bootstrap_admin()
 
         row = db.query_one(

@@ -7,7 +7,7 @@ mistake in them is invisible until someone sees work that is not theirs.
 
 from conftest import incident_payload
 
-from app import db
+from app import db, security
 
 
 def _report(invoke, token, title="Broken air conditioning"):
@@ -86,7 +86,9 @@ class TestAssignment:
     def test_cannot_assign_to_an_admin(self, invoke, registered_user, admin_token):
         """Admins oversee work; they are never assignees."""
         incident_id = _report(invoke, registered_user["token"])
-        admin = db.query_one("SELECT id FROM users WHERE email = 'admin@acme.inc'")
+        admin = db.query_one(
+            "SELECT id FROM users WHERE email = %s", (security.SEED_ADMIN_EMAIL,)
+        )
 
         status, _ = _assign(invoke, admin_token, incident_id, admin["id"])
 
@@ -489,7 +491,7 @@ class TestEngineerList:
 
         emails = [engineer["email"] for engineer in body["engineers"]]
         assert registered_user["email"] not in emails
-        assert "admin@acme.inc" not in emails
+        assert security.SEED_ADMIN_EMAIL not in emails
 
     def test_engineer_cannot_list_engineers(self, invoke, engineer_user):
         status, _ = invoke("GET", "/api/v1/engineers", token=engineer_user["token"])

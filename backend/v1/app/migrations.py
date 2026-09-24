@@ -263,6 +263,33 @@ _MIGRATIONS: list[Migration] = [
         CREATE INDEX IF NOT EXISTS incidents_building_idx ON incidents (building_id);
         """,
     ),
+    Migration(
+        version=6,
+        name="incident_comments",
+        # Conversation on a ticket between the reporter, the assigned engineer
+        # and the admin.
+        #
+        # Comments belong to their incident, so deleting one takes its comments
+        # with it (CASCADE). author_id has no ON DELETE clause, matching
+        # created_by on incidents: a comment must always say who wrote it, and
+        # accounts are disabled rather than deleted.
+        #
+        # There is no updated_at, and no update or delete endpoint. Comments are
+        # a permanent record of what was said and when.
+        sql="""
+        CREATE TABLE IF NOT EXISTS incident_comments (
+            id          BIGSERIAL PRIMARY KEY,
+            incident_id BIGINT NOT NULL REFERENCES incidents (id) ON DELETE CASCADE,
+            author_id   BIGINT NOT NULL REFERENCES users (id),
+            body        TEXT NOT NULL,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+
+        -- The only query this table has: one incident's comments, oldest first.
+        CREATE INDEX IF NOT EXISTS incident_comments_incident_idx
+            ON incident_comments (incident_id, created_at);
+        """,
+    ),
 ]
 
 

@@ -33,11 +33,13 @@ import { Link as RouterLink, useParams } from 'react-router-dom'
 
 import { getIncident, listEngineers, updateIncident } from '../api/client'
 import useAuth from '../auth/useAuth'
+import CommentThread from '../components/CommentThread'
 import WorkflowStepper from '../components/WorkflowStepper'
 import { isLocationArchived, locationPath } from '../facilities'
 import {
   ADMIN_SETTABLE,
   ENGINEER_SETTABLE,
+  STATUS_CLOSED,
   categoryLabel,
   formatDateTime,
   priorityDisplay,
@@ -332,6 +334,16 @@ export default function IncidentDetailPage() {
                 </Box>
               </>
             )}
+
+            <Divider />
+
+            {/* Reads the status from the loaded incident rather than its own
+                copy, so closing or reopening above hides or restores the box
+                immediately. */}
+            <CommentThread
+              incidentId={incident.id}
+              isClosed={incident.status === STATUS_CLOSED}
+            />
           </Stack>
         </Paper>
       )}

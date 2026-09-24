@@ -10,4 +10,4 @@ by the helpers in ``app.http``, which means it can be tested by constructing a
 Request directly. Routes are wired to them in ``app.router``.
 """
 
-__all__ = ["auth", "facilities", "health", "incidents", "users"]
+__all__ = ["analytics", "auth", "comments", "facilities", "health", "incidents", "users"]

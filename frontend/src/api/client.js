@@ -281,9 +281,44 @@ export function deleteSeat(id) {
   return del(`/seats/${id}`)
 }
 
-/** Every incident in the organisation, newest first, with reporter details. */
-export function listAllIncidents() {
-  return get('/admin/incidents')
+/**
+ * Read an incident's comments, oldest first.
+ *
+ * Open to whoever may see the incident — the reporter, the assigned engineer,
+ * or an admin. Anyone else gets a 404, the same as for the incident itself.
+ */
+export function listComments(incidentId) {
+  return get(`/incidents/${incidentId}/comments`)
+}
+
+/** Add a comment. Rejected with 403 once the incident is closed. */
+export function createComment(incidentId, body) {
+  return post(`/incidents/${incidentId}/comments`, { body })
+}
+
+/**
+ * Every incident in the organisation, newest first, with reporter details.
+ *
+ * Filters are optional and combine with AND. Empty values are dropped rather
+ * than sent as blanks, so "no filter" and "filter for nothing" stay distinct.
+ * Filtering runs in the database, so the browser never receives rows it hides.
+ */
+export function listAllIncidents(filters = {}) {
+  const params = new URLSearchParams()
+
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== '' && value !== null && value !== undefined) {
+      params.set(key, value)
+    }
+  }
+
+  const query = params.toString()
+  return get(`/admin/incidents${query ? `?${query}` : ''}`)
+}
+
+/** Incident totals by status, category and building. Facility Admin only. */
+export function getAnalytics() {
+  return get('/admin/analytics')
 }
 
 /** Every user account. */

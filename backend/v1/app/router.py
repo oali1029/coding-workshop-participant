@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from . import security
-from .domains import auth, facilities, health, incidents, users
+from .domains import analytics, auth, comments, facilities, health, incidents, users
 from .errors import MethodNotAllowedError, NotFoundError
 from .http import Request
 
@@ -72,10 +72,25 @@ ROUTES: list[Route] = [
     # Engineers work their own assigned incidents, admins work any; the handler
     # decides which, and which statuses each may set.
     Route("PATCH", "/incidents/{id}", incidents.update, roles=security.ENGINEER_OR_ADMIN),
+    # Comments are open to anyone who may see the incident — reporter, assigned
+    # engineer or admin — so the route gate is broad and the handler decides.
+    Route(
+        "GET",
+        "/incidents/{id}/comments",
+        comments.list_for_incident,
+        roles=security.ANY_AUTHENTICATED,
+    ),
+    Route(
+        "POST",
+        "/incidents/{id}/comments",
+        comments.create,
+        roles=security.ANY_AUTHENTICATED,
+    ),
     # Facility Admin oversight and team management. Separate paths rather than
     # role-aware versions of the routes above, so the access rule is visible
     # here instead of buried in a handler.
     Route("GET", "/admin/incidents", incidents.list_all, roles=security.FACILITY_ADMIN_ONLY),
+    Route("GET", "/admin/analytics", analytics.summary, roles=security.FACILITY_ADMIN_ONLY),
     Route("GET", "/users", users.list_all, roles=security.FACILITY_ADMIN_ONLY),
     Route("GET", "/engineers", users.list_engineers, roles=security.FACILITY_ADMIN_ONLY),
     Route("PATCH", "/users/{id}/role", users.set_role, roles=security.FACILITY_ADMIN_ONLY),

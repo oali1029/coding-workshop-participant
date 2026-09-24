@@ -38,21 +38,21 @@ os.environ.setdefault("POSTGRES_NAME", "postgres")
 # keeps passing whatever value an environment happens to supply.
 BOOTSTRAP_ADMIN_TEST_PASSWORD = "pytest-only-not-a-real-password"
 
-# Captured BEFORE the override below, because the suite shares one database with
-# the running application. The tests reseed admin@acme.inc with the throwaway
-# password above, and ensure_bootstrap_admin creates but never resets — so
-# without restoring it afterwards the developer's own admin login would silently
-# stop working until they deleted the row by hand.
-DEVELOPER_BOOTSTRAP_PASSWORD = os.environ.get("BOOTSTRAP_ADMIN_PASSWORD") or os.environ.get(
-    "TF_VAR_aws_bootstrap_admin_password"
-)
-
 os.environ["BOOTSTRAP_ADMIN_PASSWORD"] = BOOTSTRAP_ADMIN_TEST_PASSWORD
 
 from app import db, migrations, security  # noqa: E402  (must follow the env setup above)
 
 # Every address created by a test contains this, so cleanup can find them.
 TEST_EMAIL_MARKER = "+pytest-"
+
+# The suite runs against the same database as the developer's own application,
+# so it seeds its administrator at its own address rather than the real
+# admin@acme.inc. Pointing security.SEED_ADMIN_EMAIL here for the session means
+# ensure_bootstrap_admin is still exercised for real — it just creates, resets
+# and deletes an account belonging to the tests. Without this the suite would
+# overwrite the developer's administrator password and, because seeding never
+# resets an existing account, quietly lock them out until they deleted the row.
+TEST_ADMIN_EMAIL = f"admin{TEST_EMAIL_MARKER}suite@acme.inc"
 
 # Buildings created by this suite carry this prefix so cleanup leaves real ones
 # alone.
@@ -68,39 +68,44 @@ def prepared_database():
     """Migrate once per session, and clean test rows either side of the run."""
     migrations.run_migrations()
 
+    # Redirect the seeded-administrator address for the whole session, so
+    # nothing below can reach the developer's real account. See TEST_ADMIN_EMAIL.
+    security.SEED_ADMIN_EMAIL = TEST_ADMIN_EMAIL
+
     # Remove any administrator left over from a previous run so that the account
     # is recreated with the test password set above. Without this, a database
     # seeded earlier with a different password would make the admin login test
     # fail for a reason that has nothing to do with the code under test.
-    db.execute("DELETE FROM users WHERE email = %s", (security.SEED_ADMIN_EMAIL,))
+    # Test accounts first: the suite's administrator carries the same marker, so
+    # seeding it before this sweep would only delete it again.
+    _delete_test_users()
+    remove_seed_admin()
     migrations.ensure_bootstrap_admin()
 
-    _delete_test_users()
     _create_test_facility()
 
     yield  # the tests run at this point
 
     _delete_test_users()
     _delete_test_facilities()
-    _restore_developer_admin()
 
 
-def _restore_developer_admin() -> None:
-    """Undo the suite's overwrite of admin@acme.inc.
+def remove_seed_admin() -> None:
+    """Delete the suite's administrator, clearing what would otherwise block it.
 
-    The account is removed either way, so a stale test password can never
-    shadow the real one. When the developer has supplied a bootstrap password it
-    is recreated immediately; otherwise the next application startup creates it.
+    Incidents and comments both reference users with no ON DELETE rule, on
+    purpose: history should outlive an account, and the application has no
+    endpoint that removes a user. The seeding tests do remove one, so the one
+    place that knows which tables point at ``users`` is here rather than in each
+    test. Only ever the test account — see TEST_ADMIN_EMAIL.
     """
-    db.execute(
-        "DELETE FROM incidents WHERE created_by = (SELECT id FROM users WHERE email = %s)",
-        (security.SEED_ADMIN_EMAIL,),
-    )
-    db.execute("DELETE FROM users WHERE email = %s", (security.SEED_ADMIN_EMAIL,))
+    admin = "SELECT id FROM users WHERE email = %s"
 
-    if DEVELOPER_BOOTSTRAP_PASSWORD:
-        os.environ["BOOTSTRAP_ADMIN_PASSWORD"] = DEVELOPER_BOOTSTRAP_PASSWORD
-        migrations.ensure_bootstrap_admin()
+    db.execute(f"DELETE FROM incident_comments WHERE author_id = ({admin})",
+               (security.SEED_ADMIN_EMAIL,))
+    db.execute(f"DELETE FROM incidents WHERE created_by = ({admin})",
+               (security.SEED_ADMIN_EMAIL,))
+    db.execute("DELETE FROM users WHERE email = %s", (security.SEED_ADMIN_EMAIL,))
 
 
 def _create_test_facility() -> None:
@@ -161,11 +166,18 @@ def incident_payload(**overrides):
 def _delete_test_users() -> None:
     """Remove the accounts this suite created, and anything referencing them.
 
-    incidents.created_by is a foreign key with no ON DELETE rule, so PostgreSQL
-    refuses to delete a user who still has incidents — deliberately, since
-    incident history should outlive an account. Tests therefore clear their
-    incidents first.
+    Incidents and comments both reference users with no ON DELETE rule, so
+    PostgreSQL refuses to delete a user who still has either — deliberately,
+    since that history should outlive an account. Tests therefore clear what
+    they wrote first.
     """
+    db.execute(
+        """
+        DELETE FROM incident_comments
+        WHERE author_id IN (SELECT id FROM users WHERE email LIKE %s)
+        """,
+        (f"%{TEST_EMAIL_MARKER}%",),
+    )
     db.execute(
         """
         DELETE FROM incidents
@@ -277,10 +289,7 @@ def engineer_user(unique_email):
 
 @pytest.fixture
 def admin_token():
-    """A token for the seeded FACILITY_ADMIN.
-
-    Used to confirm that admins are creator-scoped too in this slice.
-    """
+    """A token for the seeded FACILITY_ADMIN — the suite's own, not the real one."""
     from app.domains import auth
 
     response = auth.login(
@@ -327,7 +336,7 @@ def invoke():
     """
     from function import handler
 
-    def _invoke(method, path, body=None, token=None):
+    def _invoke(method, path, body=None, token=None, query=None):
         import json
 
         headers = {}
@@ -337,6 +346,9 @@ def invoke():
         event = {
             "requestContext": {"http": {"method": method, "path": path}},
             "headers": headers,
+            # AWS supplies query values as strings, so send them that way here
+            # too rather than letting a test pass an int the real API never sees.
+            "queryStringParameters": {k: str(v) for k, v in (query or {}).items()},
             "body": json.dumps(body) if body is not None else None,
         }
         response = handler(event)

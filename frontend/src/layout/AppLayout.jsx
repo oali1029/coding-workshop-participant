@@ -59,9 +59,22 @@ export default function AppLayout() {
             {isCompact ? 'ACME Incidents' : 'ACME Facility Incident Management'}
           </Typography>
 
-          {/* Primary navigation. Labels are dropped on a phone, where the
-              toolbar has no room for them alongside the user controls. */}
-          <Stack direction="row" spacing={1} sx={{ flexGrow: 1, ml: { xs: 1, sm: 3 } }}>
+          {/* Primary navigation. Labels are shortened on a phone, where the
+              toolbar has no room for them alongside the user controls.
+
+              An admin has more destinations than fit on a narrow screen, so the
+              row scrolls sideways rather than hiding links. Buttons must not
+              shrink, or they would squash into unreadable wrapped text instead. */}
+          <Stack
+            direction="row"
+            spacing={1}
+            sx={{
+              flexGrow: 1,
+              ml: { xs: 1, sm: 3 },
+              overflowX: 'auto',
+              '& .MuiButton-root': { flexShrink: 0 },
+            }}
+          >
             <Button color="inherit" component={RouterLink} to="/incidents" size="small">
               {isCompact ? 'Incidents' : 'My Incidents'}
             </Button>
@@ -85,7 +98,12 @@ export default function AppLayout() {
                 Users
               </Button>
             )}
-            {isAdmin && !isCompact && (
+            {isAdmin && (
+              <Button color="inherit" component={RouterLink} to="/admin/analytics" size="small">
+                Analytics
+              </Button>
+            )}
+            {isAdmin && (
               <Button color="inherit" component={RouterLink} to="/admin/facilities" size="small">
                 Facilities
               </Button>

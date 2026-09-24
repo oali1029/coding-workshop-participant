@@ -204,6 +204,16 @@ def _required_id(body: dict[str, Any], field: str) -> int:
         raise ValidationError("This field is required.", details={"field": field})
 
 
+def _escape_like(value: str) -> str:
+    """Make a search term match literally inside an ILIKE pattern.
+
+    ``%`` and ``_`` are wildcards in LIKE, so a search for "50%" would otherwise
+    match almost everything. Backslash is PostgreSQL's default escape character,
+    so it has to be escaped first or it would escape the escapes.
+    """
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _incident_id(request: Request) -> int:
     """Read the {id} path parameter as a number.
 
@@ -302,12 +312,82 @@ def list_assigned(request: Request) -> dict[str, Any]:
 
 
 def list_all(request: Request) -> dict[str, Any]:
-    """Every incident in the organisation, newest first.
+    """Every incident in the organisation, newest first, optionally filtered.
 
     The Facility Admin's oversight view. Restricted to FACILITY_ADMIN by the
     route table, so there is no role check here.
+
+    Query parameters, all optional and combined with AND:
+
+        q          case-insensitive match on title, description, reporter or
+                   assignee name
+        status     one of STATUSES
+        category   one of CATEGORIES
+        building   building id
+        assignee   engineer id, or "unassigned"
+
+    Filtering happens in PostgreSQL rather than the browser, so the client never
+    receives rows it then hides.
     """
-    rows = db.query_all(f"{_INCIDENT_SELECT} ORDER BY i.created_at DESC")
+    query = request.query
+    conditions: list[str] = []
+    params: list[Any] = []
+
+    search = (query.get("q") or "").strip()
+    if search:
+        # ILIKE is case-insensitive and needs no extension. At this scale a scan
+        # is fine; a trigram index would be the next step if it ever is not.
+        conditions.append(
+            """(
+                i.title ILIKE %s OR i.description ILIKE %s
+                OR reporter.full_name ILIKE %s OR assignee.full_name ILIKE %s
+            )"""
+        )
+        params.extend([f"%{_escape_like(search)}%"] * 4)
+
+    status = (query.get("status") or "").strip().upper()
+    if status:
+        if status not in STATUSES:
+            raise ValidationError(
+                f"Must be one of: {', '.join(STATUSES)}.", details={"field": "status"}
+            )
+        conditions.append("i.status = %s")
+        params.append(status)
+
+    category = (query.get("category") or "").strip().upper()
+    if category:
+        if category not in CATEGORIES:
+            raise ValidationError(
+                f"Must be one of: {', '.join(CATEGORIES)}.", details={"field": "category"}
+            )
+        conditions.append("i.category = %s")
+        params.append(category)
+
+    building = (query.get("building") or "").strip()
+    if building:
+        try:
+            params.append(int(building))
+        except ValueError:
+            raise ValidationError("Invalid building.", details={"field": "building"})
+        conditions.append("i.building_id = %s")
+
+    assignee = (query.get("assignee") or "").strip()
+    if assignee:
+        if assignee.lower() == "unassigned":
+            conditions.append("i.assignee_id IS NULL")
+        else:
+            try:
+                params.append(int(assignee))
+            except ValueError:
+                raise ValidationError("Invalid assignee.", details={"field": "assignee"})
+            conditions.append("i.assignee_id = %s")
+
+    # Only fixed fragments reach the SQL text; every value is a parameter.
+    where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+
+    rows = db.query_all(
+        f"{_INCIDENT_SELECT}{where} ORDER BY i.created_at DESC", tuple(params)
+    )
 
     return ok({"incidents": rows})
 
@@ -322,17 +402,17 @@ def get_one(request: Request) -> dict[str, Any]:
     incident_id = _incident_id(request)
     row = _fetch(incident_id)
 
-    if row is None or not _may_view(request.user, row):
+    if row is None or not may_view(request.user, row):
         raise NotFoundError("Incident not found.")
 
     return ok({"incident": row})
 
 
-def _may_view(user: dict[str, Any], incident: dict[str, Any]) -> bool:
+def may_view(user: dict[str, Any], incident: dict[str, Any]) -> bool:
     """Whether this user may see this incident.
 
     Three independent claims: you reported it, it is assigned to you, or you are
-    an admin overseeing everything.
+    an admin overseeing everything. Public because comments apply the same rule.
     """
     if user["role"] == security.ROLE_FACILITY_ADMIN:
         return True

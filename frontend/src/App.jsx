@@ -20,6 +20,7 @@ import AppLayout from './layout/AppLayout'
 import AdminFacilitiesPage from './pages/AdminFacilitiesPage'
 import AdminIncidentsPage from './pages/AdminIncidentsPage'
 import AdminUsersPage from './pages/AdminUsersPage'
+import AnalyticsPage from './pages/AnalyticsPage'
 import AssignedIncidentsPage from './pages/AssignedIncidentsPage'
 import HomePage from './pages/HomePage'
 import IncidentDetailPage from './pages/IncidentDetailPage'
@@ -62,6 +63,7 @@ function App() {
                     pages keep the same chrome as everything else. */}
                 <Route element={<AdminRoute />}>
                   <Route path="/admin/incidents" element={<AdminIncidentsPage />} />
+                  <Route path="/admin/analytics" element={<AnalyticsPage />} />
                   <Route path="/admin/facilities" element={<AdminFacilitiesPage />} />
                   <Route path="/admin/users" element={<AdminUsersPage />} />
                 </Route>
