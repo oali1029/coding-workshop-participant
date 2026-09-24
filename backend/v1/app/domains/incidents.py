@@ -216,6 +216,13 @@ def _required_id(body: dict[str, Any], field: str) -> int:
         raise ValidationError("This field is required.", details={"field": field})
 
 
+# The incident filtering logic is centralized here. Employees, engineers and
+# administrators use the same filter builder, but their authorization scope is
+# established first.
+#
+# So an Employee's query starts with only incidents they created. Search and
+# filters can narrow that dataset, but they can't expand it to somebody else's
+# incidents.
 def build_filters(query: dict[str, str], allow_assignee: bool) -> tuple[list[str], list[Any]]:
     """Turn query parameters into SQL conditions and their values.
 
@@ -236,6 +243,10 @@ def build_filters(query: dict[str, str], allow_assignee: bool) -> tuple[list[str
     """
     conditions: list[str] = []
     params: list[Any] = []
+
+    # The filter values are passed as SQL parameters rather than concatenating
+    # user input directly into the query. That also protects the query from SQL
+    # injection.
 
     search = (query.get("q") or "").strip()
     if search:

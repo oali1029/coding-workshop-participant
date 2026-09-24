@@ -23,6 +23,8 @@
  * token, worth revisiting for real employee data.
  */
 
+import { ApiError, readResponse } from './response'
+
 const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:3001').replace(/\/$/, '')
 const API_PREFIX = '/api/v1'
 const TOKEN_STORAGE_KEY = 'acme.auth.token'
@@ -57,16 +59,11 @@ export function getAuthToken() {
 /**
  * Thrown when the backend replies with a failure status. Components branch on
  * `status` and `code` — a 401 sends the user to login, a 400 shows inline.
+ *
+ * Defined in ./response.js alongside the rule that decides which replies are
+ * failures, and re-exported here so callers still import it from one place.
  */
-export class ApiError extends Error {
-  constructor(message, status, code, details) {
-    super(message)
-    this.name = 'ApiError'
-    this.status = status
-    this.code = code
-    this.details = details
-  }
-}
+export { ApiError }
 
 async function request(path, { method = 'GET', body, auth = true } = {}) {
   const url = `${API_BASE}${API_PREFIX}${path}`
@@ -95,35 +92,13 @@ async function request(path, { method = 'GET', body, auth = true } = {}) {
     )
   }
 
-  if (response.status === 204) {
-    return null
+  // Clearing the token here, where every response passes, prevents the app
+  // looping on a credential the server has already rejected.
+  if (response.status === 401) {
+    setAuthToken(null)
   }
 
-  // A crashing server or a proxy can return an HTML error page; we would
-  // rather report the status than mask it behind a JSON parse error.
-  let payload
-  try {
-    payload = await response.json()
-  } catch {
-    payload = null
-  }
-
-  if (!response.ok) {
-    // Clearing the token here, where every response passes, prevents the app
-    // looping on a credential the server has already rejected.
-    if (response.status === 401) {
-      setAuthToken(null)
-    }
-
-    throw new ApiError(
-      payload?.message || `Request failed with status ${response.status}.`,
-      response.status,
-      payload?.error || 'unknown_error',
-      payload?.details,
-    )
-  }
-
-  return payload
+  return readResponse(response)
 }
 
 export function get(path, options) {

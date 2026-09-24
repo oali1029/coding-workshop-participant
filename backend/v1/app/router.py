@@ -53,6 +53,14 @@ class Route:
     roles: frozenset[str] | None = None
 
 
+# This is the API routing layer. Each route maps an HTTP method and endpoint to a
+# backend handler, and the permitted roles are attached to protected routes. For
+# example, facility-management endpoints are restricted to Facility Admins.
+#
+# Authorization is enforced on the backend rather than relying on React to hide
+# buttons. A user could manually send an HTTP request without using the
+# frontend, so the API still has to independently verify their role.
+
 # The complete API surface. Read the roles column to see the security model.
 ROUTES: list[Route] = [
     Route("GET", "/health", health.get_health, roles=None),
