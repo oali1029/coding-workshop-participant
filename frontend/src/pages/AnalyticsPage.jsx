@@ -1,12 +1,13 @@
 /**
- * Analytics — the Facility Admin's overview of where incidents are coming from.
+ * Analytics — the Facility Admin's dashboard.
  *
- * Every number here is counted by PostgreSQL and arrives ready to display; this
- * page does no tallying of its own. That is why it works without the admin's
- * browser ever holding the full incident list.
+ * Every figure is counted by PostgreSQL and arrives ready to display; this page
+ * does no tallying of its own. That is why it works without the admin's browser
+ * ever holding the incident list.
  *
- * Bars are drawn with MUI's LinearProgress rather than a charting library, which
- * keeps the bundle small and adds no dependency for what is a row of proportions.
+ * Each section pairs a donut with a table showing the same numbers. The table is
+ * the authoritative version — it carries the exact counts and percentages, and
+ * it stays readable without colour — so the chart is marked decorative.
  */
 
 import { useEffect, useState } from 'react'
@@ -14,59 +15,68 @@ import {
   Alert,
   Box,
   CircularProgress,
-  LinearProgress,
   Paper,
   Stack,
   Typography,
+  useTheme,
 } from '@mui/material'
 
 import { getAnalytics } from '../api/client'
+import BreakdownSection from '../components/BreakdownSection'
 import { CATEGORIES, statusDisplay } from '../incidents'
 
-// The order the workflow runs in, so the status list reads as a pipeline rather
-// than in whatever order the API happened to serialise the object.
+// Workflow order, so the cards and rows read as a pipeline rather than in
+// whatever order the API serialised the object.
 const STATUS_ORDER = ['OPEN', 'IN_PROGRESS', 'BLOCKED', 'RESOLVED', 'CLOSED']
 
-/** One labelled row with a proportional bar. */
-function BreakdownRow({ label, count, total, color = 'primary' }) {
-  // Guard against 0/0 on an empty dataset, which would render NaN.
-  const percent = total > 0 ? (count / total) * 100 : 0
-
-  return (
-    <Box>
-      <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.5 }}>
-        <Typography variant="body2">{label}</Typography>
-        <Typography variant="body2" color="text.secondary">
-          {count}
-        </Typography>
-      </Stack>
-      <LinearProgress
-        variant="determinate"
-        value={percent}
-        color={color}
-        sx={{ height: 8, borderRadius: 4 }}
-      />
-    </Box>
-  )
+/**
+ * Colours for category and building slices, which carry no meaning of their own
+ * to map to — unlike statuses, where the chip colour already says "blocked is
+ * bad". Taken from the theme so the charts match the rest of the application.
+ */
+function sliceColors(theme) {
+  return [
+    theme.palette.primary.main,
+    theme.palette.secondary?.main || theme.palette.info.dark,
+    theme.palette.success.main,
+    theme.palette.warning.main,
+    theme.palette.error.main,
+    theme.palette.info.main,
+    theme.palette.grey[600],
+    theme.palette.primary.light,
+    theme.palette.success.dark,
+    theme.palette.warning.dark,
+  ]
 }
 
-function Section({ title, description, children }) {
+/** One compact figure at the top of the page. */
+function SummaryCard({ label, count, accent }) {
   return (
-    <Paper variant="outlined" sx={{ p: { xs: 2.5, sm: 3 } }}>
-      <Typography variant="subtitle1" gutterBottom>
-        {title}
+    <Paper
+      variant="outlined"
+      sx={{
+        p: 2,
+        flex: '1 1 140px',
+        minWidth: 130,
+        textAlign: 'center',
+        // A coloured top edge ties each card to its slice without flooding the
+        // page with background colour.
+        borderTop: 3,
+        borderTopColor: accent,
+      }}
+    >
+      <Typography variant="h4" component="p" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
+        {count}
       </Typography>
-      {description && (
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          {description}
-        </Typography>
-      )}
-      {children}
+      <Typography variant="body2" color="text.secondary">
+        {label}
+      </Typography>
     </Paper>
   )
 }
 
 export default function AnalyticsPage() {
+  const theme = useTheme()
   const [status, setStatus] = useState('loading')
   const [summary, setSummary] = useState(null)
   const [errorMessage, setErrorMessage] = useState('')
@@ -96,6 +106,40 @@ export default function AnalyticsPage() {
     }
   }, [])
 
+  function statusColor(value) {
+    const { color } = statusDisplay(value)
+    return theme.palette[color]?.main || theme.palette.grey[500]
+  }
+
+  const palette = sliceColors(theme)
+
+  const statusRows =
+    summary &&
+    STATUS_ORDER.map((value) => ({
+      key: value,
+      label: statusDisplay(value).label,
+      count: summary.by_status[value] ?? 0,
+      color: statusColor(value),
+    }))
+
+  const categoryRows =
+    summary &&
+    CATEGORIES.map((category, index) => ({
+      key: category.value,
+      label: category.label,
+      count: summary.by_category[category.value] ?? 0,
+      color: palette[index % palette.length],
+    }))
+
+  const buildingRows =
+    summary &&
+    summary.by_building.map((row, index) => ({
+      key: row.building,
+      label: row.building,
+      count: row.count,
+      color: palette[index % palette.length],
+    }))
+
   return (
     <Stack spacing={3}>
       <Box>
@@ -117,66 +161,58 @@ export default function AnalyticsPage() {
 
       {status === 'success' && summary && (
         <>
-          <Paper variant="outlined" sx={{ p: 3, textAlign: 'center' }}>
-            <Typography variant="h3" component="p">
-              {summary.total}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              {summary.total === 1 ? 'incident reported' : 'incidents reported'}
-            </Typography>
-          </Paper>
+          {/* Wraps onto as many rows as it needs, so the six figures stay
+              readable from a phone up. */}
+          <Stack direction="row" spacing={2} useFlexGap flexWrap="wrap">
+            <SummaryCard
+              label="Total Issues"
+              count={summary.total}
+              accent={theme.palette.text.primary}
+            />
+            {STATUS_ORDER.map((value) => (
+              <SummaryCard
+                key={value}
+                label={statusDisplay(value).short}
+                count={summary.by_status[value] ?? 0}
+                accent={statusColor(value)}
+              />
+            ))}
+          </Stack>
 
-          <Section
-            title="By status"
-            description="Every status is listed, including those nothing is currently in."
-          >
-            <Stack spacing={2}>
-              {STATUS_ORDER.map((value) => (
-                <BreakdownRow
-                  key={value}
-                  label={statusDisplay(value).label}
-                  count={summary.by_status[value] ?? 0}
-                  total={summary.total}
-                  color={statusDisplay(value).color}
-                />
-              ))}
-            </Stack>
-          </Section>
+          <BreakdownSection
+            title="Issues by Status"
+            tableTitle="Status Breakdown"
+            firstColumn="Status"
+            rows={statusRows}
+            total={summary.total}
+          />
 
-          <Section title="By category">
-            <Stack spacing={2}>
-              {CATEGORIES.map((category) => (
-                <BreakdownRow
-                  key={category.value}
-                  label={category.label}
-                  count={summary.by_category[category.value] ?? 0}
-                  total={summary.total}
-                />
-              ))}
-            </Stack>
-          </Section>
+          <BreakdownSection
+            title="Issues by Category"
+            tableTitle="Category Breakdown"
+            firstColumn="Incident Type"
+            rows={categoryRows}
+            total={summary.total}
+          />
 
-          <Section
-            title="By building"
-            description="Busiest first. Incidents whose building was later removed are grouped together, so these figures still add up to the total."
-          >
-            {summary.by_building.length === 0 ? (
+          {buildingRows.length === 0 ? (
+            <Paper variant="outlined" sx={{ p: { xs: 2.5, sm: 3 } }}>
+              <Typography variant="subtitle1" gutterBottom>
+                Issues by Building
+              </Typography>
               <Typography variant="body2" color="text.secondary">
                 No incidents have been reported yet.
               </Typography>
-            ) : (
-              <Stack spacing={2}>
-                {summary.by_building.map((row) => (
-                  <BreakdownRow
-                    key={row.building}
-                    label={row.building}
-                    count={row.count}
-                    total={summary.total}
-                  />
-                ))}
-              </Stack>
-            )}
-          </Section>
+            </Paper>
+          ) : (
+            <BreakdownSection
+              title="Issues by Building"
+              tableTitle="Building Breakdown"
+              firstColumn="Building"
+              rows={buildingRows}
+              total={summary.total}
+            />
+          )}
         </>
       )}
     </Stack>

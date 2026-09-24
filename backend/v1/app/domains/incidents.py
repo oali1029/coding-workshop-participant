@@ -546,3 +546,44 @@ def update(request: Request) -> dict[str, Any]:
     )
 
     return ok({"incident": _fetch(incident_id)})
+
+
+def delete(request: Request) -> dict[str, Any]:
+    """Permanently remove an incident and its comments. Facility Admin only.
+
+    Distinct from CLOSED, which records that the work was done. This removes the
+    record entirely — for a duplicate, a test ticket or a report filed in error —
+    so it is allowed from any status, including CLOSED.
+
+    Comments go with it through ON DELETE CASCADE on incident_comments (migration
+    6) rather than a second statement here: one DELETE means there is no window
+    in which the incident is gone but its comments are not.
+
+    Nothing else is touched. The incident's references to its reporter, assignee
+    and location point outward, so removing this row cannot affect those records.
+
+    Raises:
+        NotFoundError: no incident with that id. Unlike the other handlers there
+            is no visibility rule to apply — the route is admin-only, and admins
+            may see everything.
+    """
+    incident_id = _incident_id(request)
+
+    # Counted first: after the DELETE the rows are gone and cannot be counted.
+    comments = db.query_one(
+        "SELECT COUNT(*) AS n FROM incident_comments WHERE incident_id = %s", (incident_id,)
+    )
+
+    row = db.query_one("DELETE FROM incidents WHERE id = %s RETURNING id", (incident_id,))
+
+    if row is None:
+        raise NotFoundError("Incident not found.")
+
+    logger.info(
+        "Admin %s deleted incident %s (%s comments removed)",
+        request.user["id"],
+        incident_id,
+        comments["n"],
+    )
+
+    return ok({"deleted": incident_id, "comments_deleted": comments["n"]})

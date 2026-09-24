@@ -15,12 +15,18 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
+import DeleteIcon from '@mui/icons-material/Delete'
 import {
   Alert,
   Box,
   Button,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
   Divider,
   MenuItem,
   Paper,
@@ -29,9 +35,9 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import { Link as RouterLink, useParams } from 'react-router-dom'
+import { Link as RouterLink, useNavigate, useParams } from 'react-router-dom'
 
-import { getIncident, listEngineers, updateIncident } from '../api/client'
+import { deleteIncident, getIncident, listEngineers, updateIncident } from '../api/client'
 import useAuth from '../auth/useAuth'
 import CommentThread from '../components/CommentThread'
 import WorkflowStepper from '../components/WorkflowStepper'
@@ -65,6 +71,7 @@ function DetailRow({ label, children }) {
 export default function IncidentDetailPage() {
   const { id } = useParams()
   const { user } = useAuth()
+  const navigate = useNavigate()
 
   const [status, setStatus] = useState('loading')
   const [incident, setIncident] = useState(null)
@@ -74,6 +81,10 @@ export default function IncidentDetailPage() {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [toast, setToast] = useState('')
+
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
 
   const isAdmin = user.role === ROLE_FACILITY_ADMIN
   const isEngineer = user.role === ROLE_ENGINEER
@@ -157,6 +168,30 @@ export default function IncidentDetailPage() {
     },
     [id],
   )
+
+  /**
+   * Delete the incident, then leave — the page it is showing no longer exists.
+   *
+   * The success message is handed to the destination through router state,
+   * since a Snackbar here would unmount with this component on navigation.
+   */
+  async function handleDelete() {
+    setDeleting(true)
+    setDeleteError('')
+
+    try {
+      await deleteIncident(id)
+      navigate('/admin/incidents', {
+        replace: true,
+        state: { notice: `Incident #${id} and its comments were deleted.` },
+      })
+    } catch (error) {
+      // Close the dialog so the failure is visible behind it, on the page.
+      setDeleteError(error.message)
+      setConfirmingDelete(false)
+      setDeleting(false)
+    }
+  }
 
   // An engineer may only work incidents assigned to them; an admin, any.
   const canChangeStatus =
@@ -344,9 +379,70 @@ export default function IncidentDetailPage() {
               incidentId={incident.id}
               isClosed={incident.status === STATUS_CLOSED}
             />
+
+            {/* Admin only, and separated from the controls above because it is
+                not a workflow step: closing records finished work, this removes
+                the record. Hiding it is a courtesy — the API is the authority
+                and refuses every other role. */}
+            {isAdmin && (
+              <>
+                <Divider />
+                <Box>
+                  <Typography variant="subtitle2" gutterBottom>
+                    Danger zone
+                  </Typography>
+
+                  {deleteError && (
+                    <Alert severity="error" sx={{ mb: 2 }}>
+                      {deleteError}
+                    </Alert>
+                  )}
+
+                  <Stack
+                    direction={{ xs: 'column', sm: 'row' }}
+                    spacing={2}
+                    alignItems={{ sm: 'center' }}
+                  >
+                    <Button
+                      variant="outlined"
+                      color="error"
+                      startIcon={<DeleteIcon />}
+                      onClick={() => setConfirmingDelete(true)}
+                    >
+                      Delete incident
+                    </Button>
+                    <Typography variant="caption" color="text.secondary">
+                      Permanently removes this incident and its comments.
+                    </Typography>
+                  </Stack>
+                </Box>
+              </>
+            )}
           </Stack>
         </Paper>
       )}
+
+      <Dialog
+        open={confirmingDelete}
+        onClose={() => (deleting ? null : setConfirmingDelete(false))}
+        aria-labelledby="delete-incident-title"
+      >
+        <DialogTitle id="delete-incident-title">Delete incident?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            This will permanently delete this incident and its comments. This action cannot
+            be undone.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmingDelete(false)} disabled={deleting}>
+            Cancel
+          </Button>
+          <Button onClick={handleDelete} color="error" variant="contained" disabled={deleting}>
+            {deleting ? 'Deleting…' : 'Delete incident'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Snackbar
         open={Boolean(toast)}

@@ -224,6 +224,16 @@ export function updateIncident(id, changes) {
   return patch(`/incidents/${id}`, changes)
 }
 
+/**
+ * Permanently remove an incident and its comments. Facility Admin only.
+ *
+ * Separate from setting the status to CLOSED: that records completed work,
+ * this removes the record. The backend refuses every other role.
+ */
+export function deleteIncident(id) {
+  return del(`/incidents/${id}`)
+}
+
 // --- Facility Admin only. The backend refuses these for other roles. ---
 
 /** Users who can be assigned work: active, role ENGINEER. */

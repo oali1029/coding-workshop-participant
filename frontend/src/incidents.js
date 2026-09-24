@@ -30,15 +30,17 @@ export const DEFAULT_PRIORITY = 'MEDIUM'
 // MUI Chip colours. Statuses beyond OPEN are unreachable in this slice, but a
 // later slice moves incidents through them and the list will render whatever
 // the API returns, so they are all mapped now.
+// `short` is the plain status name, for places with no room for the fuller
+// wording — the analytics summary cards. Everywhere else uses `label`.
 const STATUS_DISPLAY = {
-  OPEN: { label: 'Open', color: 'info' },
-  IN_PROGRESS: { label: 'In Progress', color: 'primary' },
-  BLOCKED: { label: 'Blocked', color: 'error' },
+  OPEN: { label: 'Open', short: 'Open', color: 'info' },
+  IN_PROGRESS: { label: 'In Progress', short: 'In Progress', color: 'primary' },
+  BLOCKED: { label: 'Blocked', short: 'Blocked', color: 'error' },
   // The stored value stays RESOLVED; only the wording changes. It means the
   // engineer believes the work is done and has submitted it for admin review —
   // not that the incident is finished. CLOSED is the finished state.
-  RESOLVED: { label: 'Resolved — awaiting review', color: 'warning' },
-  CLOSED: { label: 'Closed', color: 'success' },
+  RESOLVED: { label: 'Resolved — awaiting review', short: 'Resolved', color: 'warning' },
+  CLOSED: { label: 'Closed', short: 'Closed', color: 'success' },
 }
 
 // The happy path through the workflow, for the stepper on the detail page.
@@ -63,7 +65,7 @@ const PRIORITY_DISPLAY = {
 
 /** Falls back to the raw value so an unmapped code still shows something. */
 export function statusDisplay(status) {
-  return STATUS_DISPLAY[status] || { label: status, color: 'default' }
+  return STATUS_DISPLAY[status] || { label: status, short: status, color: 'default' }
 }
 
 export function priorityDisplay(priority) {

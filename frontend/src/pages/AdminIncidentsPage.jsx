@@ -26,6 +26,7 @@ import {
   LinearProgress,
   MenuItem,
   Paper,
+  Snackbar,
   Stack,
   Table,
   TableBody,
@@ -36,7 +37,7 @@ import {
   Typography,
 } from '@mui/material'
 import { useMediaQuery } from 'react-responsive'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 
 import { listAllIncidents, listBuildings, listEngineers } from '../api/client'
 import { buildingLabel } from '../facilities'
@@ -63,6 +64,12 @@ export default function AdminIncidentsPage() {
   const [incidents, setIncidents] = useState([])
   const [errorMessage, setErrorMessage] = useState('')
   const navigate = useNavigate()
+  const location = useLocation()
+
+  // A page that navigated here — the detail page after a deletion — can hand
+  // over a message through router state. Read during render rather than copied
+  // into state by an effect, which React warns about.
+  const notice = location.state?.notice || ''
 
   // What the user typed, and the debounced copy the request actually uses.
   const [search, setSearch] = useState('')
@@ -364,6 +371,15 @@ export default function AdminIncidentsPage() {
           </Paper>
         </>
       )}
+
+      <Snackbar
+        open={Boolean(notice)}
+        autoHideDuration={5000}
+        message={notice}
+        // Clearing the router state stops the message reappearing if the user
+        // navigates back to this entry.
+        onClose={() => navigate(location.pathname, { replace: true, state: null })}
+      />
     </Stack>
   )
 }

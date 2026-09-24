@@ -72,6 +72,9 @@ ROUTES: list[Route] = [
     # Engineers work their own assigned incidents, admins work any; the handler
     # decides which, and which statuses each may set.
     Route("PATCH", "/incidents/{id}", incidents.update, roles=security.ENGINEER_OR_ADMIN),
+    # Removing the record entirely is oversight, not fieldwork: admins only.
+    # Deliberately narrower than PATCH above, which engineers also use.
+    Route("DELETE", "/incidents/{id}", incidents.delete, roles=security.FACILITY_ADMIN_ONLY),
     # Comments are open to anyone who may see the incident — reporter, assigned
     # engineer or admin — so the route gate is broad and the handler decides.
     Route(
