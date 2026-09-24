@@ -27,6 +27,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableContainer,
   TableHead,
   TableRow,
   Tooltip,
@@ -196,8 +197,13 @@ export default function AdminIncidentsPage() {
             {isFiltered ? ' matching' : ''}
           </Typography>
 
-          <Paper variant="outlined">
-            <Table size="small">
+          {/* Eight columns need more width than the page's container gives
+              them, so without a TableContainer the table spilled out past the
+              panel's border. This keeps it inside and scrolls it sideways
+              instead; minWidth stops the columns being squeezed to the point
+              where titles and dates wrap onto three lines. */}
+          <TableContainer component={Paper} variant="outlined">
+            <Table size="small" sx={{ minWidth: 860 }}>
               <TableHead>
                 <TableRow>
                   <TableCell>Title</TableCell>
@@ -273,7 +279,7 @@ export default function AdminIncidentsPage() {
                 })}
               </TableBody>
             </Table>
-          </Paper>
+          </TableContainer>
         </>
       )}
 
